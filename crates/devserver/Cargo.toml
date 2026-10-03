@@ -15,3 +15,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 tiny_http = "0.12"
+
+# API keys entered in the preview are kept in Windows Credential Manager (under the
+# service "scriptorium-devserver", apart from the app's), so they outlast a restart
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring-core = "1"
+windows-native-keyring-store = "1"

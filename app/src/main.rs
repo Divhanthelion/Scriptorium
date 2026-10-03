@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    kjv_interlinear_lib::run()
+    scriptorium_lib::run()
 }

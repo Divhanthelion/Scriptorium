@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock};
 use keyring_core::{CredentialStore, Entry};
 use serde::Serialize;
 
-const SERVICE: &str = "io.github.divhanthelion.kjvinterlinear";
+const SERVICE: &str = "io.github.divhanthelion.scriptorium";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

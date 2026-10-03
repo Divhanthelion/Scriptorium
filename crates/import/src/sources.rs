@@ -132,7 +132,7 @@ pub fn pin() -> Result<(), String> {
 pub fn fetch() -> Result<(), String> {
     let pinned = load().unwrap_or_default();
     let client = reqwest::blocking::Client::builder()
-        .user_agent("kjv-import (https://github.com/Divhanthelion/KJV-Interlinear)")
+        .user_agent("kjv-import (https://github.com/Divhanthelion/Scriptorium)")
         .build()
         .map_err(|e| e.to_string())?;
     for (rel, url) in wanted()? {

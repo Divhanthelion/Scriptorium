@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "KJV Interlinear",
-  "mainBinaryName": "kjv-interlinear",
-  "version": "0.2.1",
-  "identifier": "io.github.divhanthelion.kjvinterlinear",
+  "productName": "Scriptorium",
+  "mainBinaryName": "scriptorium",
+  "version": "0.1.0",
+  "identifier": "io.github.divhanthelion.scriptorium",
   "build": {
     "frontendDist": "../ui"
   },
@@ -11,7 +11,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "KJV Interlinear",
+        "title": "Scriptorium",
         "width": 1200,
         "height": 820,
         "minWidth": 360,

@@ -1,7 +1,7 @@
 # The library: translations, commentaries, and context
 
-KJV Interlinear grows from one translation with Hebrew and Greek into a study
-library: every English translation we may legally ship, the classic commentaries,
+Scriptorium grew out of KJV Interlinear (one translation with its Hebrew and Greek)
+into a study library: every English translation we may legally ship, the classic commentaries,
 the Church Fathers, and cross-references. All of it ships inside the app and works
 offline. The reader then composes exactly what the study assistant sees, for
 example one verse from Luke, two from Romans, and a chapter of Habakkuk, in three

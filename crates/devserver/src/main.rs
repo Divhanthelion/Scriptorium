@@ -1,5 +1,6 @@
 //! Browser preview of the app: serves `ui/` and answers `POST /api/<command>`
-//! with the same dispatcher the app uses. Settings and API keys are kept in memory.
+//! with the same dispatcher the app uses. Settings are kept in memory; API keys too, and
+//! on Windows in Credential Manager (see `keychain`), so they outlast a restart.
 //! AI replies stream back as one JSON event per line.
 //!
 //! Run from the repository root: `cargo run -p kjv-devserver -- [port]`
@@ -155,7 +156,7 @@ Connection: close
             Ok(Value::Null)
         }
         "ai_models" => parse::<ModelsArgs>(args).and_then(|a| {
-            let key = state.keys.lock().unwrap().get(&a.provider_id).cloned();
+            let key = key_for(state, &a.provider_id);
             let list = state.runtime.block_on(kjv_ai::models(&state.client, &a.endpoint(key)))?;
             Ok(json!(list))
         }),
@@ -170,20 +171,23 @@ Connection: close
             Value::Null
         }),
         "ai_key_status" => parse::<KeyArgs>(args).map(|a| {
-            json!({"stored": state.keys.lock().unwrap().contains_key(&a.provider_id), "storage": "keychain"})
+            json!({"stored": key_for(state, &a.provider_id).is_some(), "storage": "keychain"})
         }),
         "ai_key_set" => parse::<KeyArgs>(args).map(|a| {
             let key = a.key.unwrap_or_default().trim().to_string();
             let mut keys = state.keys.lock().unwrap();
             if key.is_empty() {
                 keys.remove(&a.provider_id);
+                keychain::delete(&a.provider_id);
             } else {
+                keychain::set(&a.provider_id, &key);
                 keys.insert(a.provider_id, key);
             }
             json!("keychain")
         }),
         "ai_key_delete" => parse::<KeyArgs>(args).map(|a| {
             state.keys.lock().unwrap().remove(&a.provider_id);
+            keychain::delete(&a.provider_id);
             Value::Null
         }),
         _ => dispatch_all(&state.data, &state.library, &name, args),
@@ -219,6 +223,58 @@ struct ChatArgs {
     args: AskArgs,
 }
 
+/// A provider's API key: from this run's memory, else from the keychain (on Windows).
+fn key_for(state: &State, provider_id: &str) -> Option<String> {
+    if let Some(k) = state.keys.lock().unwrap().get(provider_id) {
+        return Some(k.clone());
+    }
+    let k = keychain::get(provider_id)?;
+    state.keys.lock().unwrap().insert(provider_id.to_string(), k.clone());
+    Some(k)
+}
+
+/// Keys entered in the preview, kept in Windows Credential Manager under their own
+/// service name so they outlast a restart (elsewhere they last as long as the server).
+#[cfg(target_os = "windows")]
+mod keychain {
+    use std::sync::{Arc, OnceLock};
+
+    use keyring_core::{CredentialStore, Entry};
+
+    const SERVICE: &str = "scriptorium-devserver";
+
+    fn entry(id: &str) -> Option<Entry> {
+        static STORE: OnceLock<Option<Arc<CredentialStore>>> = OnceLock::new();
+        let store = STORE.get_or_init(|| windows_native_keyring_store::Store::new().ok().map(|s| s as Arc<CredentialStore>)).as_ref()?;
+        store.build(SERVICE, id, None).ok()
+    }
+
+    pub fn get(id: &str) -> Option<String> {
+        entry(id)?.get_password().ok()
+    }
+
+    pub fn set(id: &str, key: &str) {
+        if let Some(e) = entry(id) {
+            let _ = e.set_password(key);
+        }
+    }
+
+    pub fn delete(id: &str) {
+        if let Some(e) = entry(id) {
+            let _ = e.delete_credential();
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod keychain {
+    pub fn get(_: &str) -> Option<String> {
+        None
+    }
+    pub fn set(_: &str, _: &str) {}
+    pub fn delete(_: &str) {}
+}
+
 fn parse<T: for<'de> Deserialize<'de>>(args: Value) -> Result<T, String> {
     serde_json::from_value(args).map_err(|e| format!("bad arguments: {}", e))
 }
@@ -241,7 +297,7 @@ fn chat(state: &State, args: Value) -> Receiver<Vec<u8>> {
             return reply;
         }
     };
-    let key = state.keys.lock().unwrap().get(&a.args.provider_id).cloned();
+    let key = key_for(state, &a.args.provider_id);
     let stop = Arc::new(Notify::new());
     state.running.lock().unwrap().insert(a.id.clone(), stop.clone());
     let (data, library, client, running) = (state.data.clone(), state.library.clone(), state.client.clone(), state.running.clone());

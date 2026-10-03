@@ -1,4 +1,4 @@
-//! KJV Interlinear app: serves the web UI in `../ui` and answers its commands.
+//! Scriptorium: serves the web UI in `../ui` and answers its commands.
 
 mod secrets;
 
@@ -186,17 +186,12 @@ fn ai_key_delete(ai: State<'_, Ai>, provider_id: String) -> Result<(), String> {
     ai.secrets.delete(&provider_id)
 }
 
-/// Sites the About section links to; nothing else can be opened.
-const ALLOWED_LINKS: [&str; 3] = [
-    "https://ebible.org/",
-    "https://www.stepbible.org/",
-    "https://github.com/Divhanthelion/KJV-Interlinear",
-];
-
 #[tauri::command]
 fn open_url(app: AppHandle, url: String) -> Result<(), String> {
-    if !ALLOWED_LINKS.iter().any(|prefix| url.starts_with(prefix)) {
-        return Err(format!("not an allowed link: {}", url));
+    // Web pages only (the Licences page's sources and licences, a note's link, a
+    // reference an answer gives), opened in the system browser; nothing else
+    if !url.starts_with("https://") || url.chars().any(char::is_whitespace) {
+        return Err(format!("not a web link: {}", url));
     }
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
@@ -238,5 +233,5 @@ pub fn run() {
             conversation_delete
         ])
         .run(tauri::generate_context!())
-        .expect("error while running KJV Interlinear");
+        .expect("error while running Scriptorium");
 }

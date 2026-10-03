@@ -731,7 +731,7 @@ function drawConsent(ctx) {
       `Your question, this conversation, and the attached Scripture will be sent to ${host}. `,
       p.preset === "local"
         ? "That's your own server."
-        : `${p.name}'s terms and privacy policy apply. KJV Interlinear doesn't see or keep any of it.`,
+        : `${p.name}'s terms and privacy policy apply. ${APP.name} doesn't see or keep any of it.`,
     ),
     h(
       "div",

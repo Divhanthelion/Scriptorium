@@ -1,6 +1,6 @@
 # Build the Microsoft Store package (.msix) from a release build of the app.
 #
-#   pwsh app/windows/msix/pack.ps1 -Exe target/release/kjv-interlinear.exe
+#   pwsh app/windows/msix/pack.ps1 -Exe target/release/scriptorium.exe
 #
 # The package is unsigned: Partner Center signs Store packages itself.
 param(
@@ -15,12 +15,12 @@ $app = Resolve-Path (Join-Path $here "..\..")
 $version = (Get-Content (Join-Path $app "tauri.conf.json") -Raw | ConvertFrom-Json).version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "unexpected version '$version' in tauri.conf.json" }
 $version = "$version.0"
-if (-not $Out) { $Out = "KJV-Interlinear_$($version)_x64.msix" }
+if (-not $Out) { $Out = "Scriptorium_$($version)_x64.msix" }
 
-$layout = Join-Path ([IO.Path]::GetTempPath()) "kjv-interlinear-msix"
+$layout = Join-Path ([IO.Path]::GetTempPath()) "scriptorium-msix"
 Remove-Item $layout -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory (Join-Path $layout "Assets") | Out-Null
-Copy-Item $Exe (Join-Path $layout "kjv-interlinear.exe")
+Copy-Item $Exe (Join-Path $layout "scriptorium.exe")
 foreach ($logo in "Square44x44Logo", "Square150x150Logo", "StoreLogo") {
     Copy-Item (Join-Path $app "icons\$logo.png") (Join-Path $layout "Assets\$logo.png")
 }

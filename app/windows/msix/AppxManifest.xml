@@ -2,6 +2,8 @@
 <!--
   Microsoft Store package. Identity values come from Partner Center
   (Product management > Product identity) and must match it exactly.
+  Scriptorium needs its own name reserved in Partner Center; replace Name below with
+  the identity Partner Center gives it (the Publisher is the account's, unchanged).
   pack.ps1 fills in the version from app/tauri.conf.json.
 -->
 <Package
@@ -11,16 +13,16 @@
   IgnorableNamespaces="uap rescap">
 
   <Identity
-    Name="Applicant.KJVInterlinear"
+    Name="Applicant.Scriptorium"
     Publisher="CN=DB7E07FF-68DD-45B8-9CBD-005C16852BEA"
     Version="$VERSION$"
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>KJV Interlinear</DisplayName>
+    <DisplayName>Scriptorium</DisplayName>
     <PublisherDisplayName>Divhanthelion</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <Description>The King James Bible with the Hebrew and Greek behind every verse.</Description>
+    <Description>A Bible study library: 44 English translations, commentaries, cross-references, and the Hebrew and Greek, all offline.</Description>
   </Properties>
 
   <Dependencies>
@@ -33,10 +35,10 @@
   </Resources>
 
   <Applications>
-    <Application Id="KJVInterlinear" Executable="kjv-interlinear.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Scriptorium" Executable="scriptorium.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="KJV Interlinear"
-        Description="The King James Bible with the Hebrew and Greek behind every verse."
+        DisplayName="Scriptorium"
+        Description="A Bible study library: 44 English translations, commentaries, cross-references, and the Hebrew and Greek, all offline."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png" />

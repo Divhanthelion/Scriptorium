@@ -21,6 +21,6 @@
 #-renamesourcefileattribute SourceFile
 
 # The window-insets bridge the page calls (see MainActivity.kt)
--keepclassmembers class io.github.divhanthelion.kjvinterlinear.MainActivity$Insets {
+-keepclassmembers class io.github.divhanthelion.scriptorium.MainActivity$Insets {
    @android.webkit.JavascriptInterface public *;
 }

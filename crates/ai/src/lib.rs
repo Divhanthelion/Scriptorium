@@ -128,7 +128,7 @@ pub fn client() -> reqwest::Client {
         .connect_timeout(Duration::from_secs(15))
         // Between chunks, not the whole answer: local models can think for minutes
         .read_timeout(Duration::from_secs(300))
-        .user_agent(concat!("KJV-Interlinear/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Scriptorium/", env!("CARGO_PKG_VERSION")))
         .build()
         .expect("HTTP client builds")
 }

@@ -3,7 +3,7 @@ name = "kjv-core"
 version = "0.1.0"
 edition = "2024"
 license = "MIT-0"
-description = "KJV text, Hebrew/Greek interlinear data, and search for KJV Interlinear"
+description = "Scriptorium's core: the KJV and its Hebrew and Greek, search, parallel reading, and the assistant's context"
 publish = false
 
 [dependencies]

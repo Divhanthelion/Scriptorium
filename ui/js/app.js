@@ -1,6 +1,7 @@
 // App controller: navigation, selection, panels, keyboard, and persistence.
 
 import { call, copyText } from "./backend.js";
+import { APP } from "./brand.js";
 import { h, icon, replace } from "./dom.js";
 import { chatScopeChanged, renderChat } from "./chat.js";
 import { renderSaved, renderSettings, renderStrongs } from "./panels.js";
@@ -177,7 +178,7 @@ function render() {
   $("ref-label").textContent = view.heading;
   $("prev-chapter").disabled = !view.prev;
   $("next-chapter").disabled = !view.next;
-  document.title = `${view.heading} (${translationAbbr()}) · KJV Interlinear`;
+  document.title = `${view.heading} (${translationAbbr()}) · ${APP.name}`;
   updateActions();
 }
 

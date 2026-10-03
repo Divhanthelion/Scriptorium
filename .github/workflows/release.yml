@@ -74,7 +74,7 @@ jobs:
           tauriScript: cargo tauri
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: KJV Interlinear ${{ github.ref_name }}
+          releaseName: Scriptorium ${{ github.ref_name }}
           releaseBody: See the assets below for Windows, macOS, and Linux installers.
           releaseDraft: true
           prerelease: false
@@ -83,12 +83,12 @@ jobs:
       - name: Microsoft Store package
         if: runner.os == 'Windows'
         shell: pwsh
-        run: app/windows/msix/pack.ps1 -Exe target/release/kjv-interlinear.exe
+        run: app/windows/msix/pack.ps1 -Exe target/release/scriptorium.exe
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
           name: microsoft-store
-          path: KJV-Interlinear_*_x64.msix
+          path: Scriptorium_*_x64.msix
           if-no-files-found: error
       - name: Keep installers as workflow artifacts
         uses: actions/upload-artifact@v4

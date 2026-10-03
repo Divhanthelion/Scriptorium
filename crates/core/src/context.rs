@@ -1015,8 +1015,8 @@ struct Places {
 pub fn instructions(lib: &Library, built: &Built) -> String {
     let a = &built.attached;
     let mut s = String::from(
-        "You are the study assistant in KJV Interlinear, a Bible study app with the King James Version \
-         (1769 Oxford text) and its Hebrew, Aramaic, and Greek, many other English translations, \
+        "You are the study assistant in Scriptorium, a Bible study library: many English translations \
+         (among them the King James Version, 1769 Oxford text, with its Hebrew, Aramaic, and Greek), \
          commentaries, and cross-references.\n\n",
     );
     if built.text.is_empty() {

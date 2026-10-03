@@ -3,7 +3,7 @@
 # several states. Each state is set by rewriting the app's settings.json and relaunching.
 set -euo pipefail
 
-BUNDLE=io.github.divhanthelion.kjvinterlinear
+BUNDLE=io.github.divhanthelion.scriptorium
 OUT=screens/ios
 mkdir -p "$OUT"
 

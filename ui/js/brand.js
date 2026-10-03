@@ -2,10 +2,10 @@
 
 export const APP = {
   name: "Scriptorium",
-  /** The code's home, once it has one (null hides the links) */
-  source: null,
-  /** Where reports go (the KJV Interlinear repository's until the app has its own) */
-  issues: "https://github.com/Divhanthelion/KJV-Interlinear/issues",
+  /** The code's home */
+  source: "https://github.com/Divhanthelion/Scriptorium",
+  /** Where reports go */
+  issues: "https://github.com/Divhanthelion/Scriptorium/issues",
   /** The app's own licence */
   licence: "MIT No Attribution (MIT-0)",
   copyright: "Copyright 2025-2026 Divhanthelion",

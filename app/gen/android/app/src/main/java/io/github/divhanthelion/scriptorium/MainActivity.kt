@@ -1,4 +1,4 @@
-package io.github.divhanthelion.kjvinterlinear
+package io.github.divhanthelion.scriptorium
 
 import android.os.Bundle
 import android.webkit.JavascriptInterface

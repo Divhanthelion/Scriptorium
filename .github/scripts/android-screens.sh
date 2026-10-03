@@ -3,7 +3,7 @@
 # Each state is set by rewriting the app's settings.json and relaunching.
 set -euo pipefail
 
-PKG=io.github.divhanthelion.kjvinterlinear
+PKG=io.github.divhanthelion.scriptorium
 OUT=screens/android
 mkdir -p "$OUT"
 

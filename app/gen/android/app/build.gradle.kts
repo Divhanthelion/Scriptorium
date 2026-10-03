@@ -25,10 +25,10 @@ val keystoreProperties = Properties().apply {
 
 android {
     compileSdk = 37
-    namespace = "io.github.divhanthelion.kjvinterlinear"
+    namespace = "io.github.divhanthelion.scriptorium"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "io.github.divhanthelion.kjvinterlinear"
+        applicationId = "io.github.divhanthelion.scriptorium"
         minSdk = 24
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

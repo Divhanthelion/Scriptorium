@@ -19,6 +19,6 @@ The study assistant is off until you set it up with an AI provider of your choic
 
 If this policy ever changes, the new version will be published here with a new date.
 
-Contact: open an issue at https://github.com/Divhanthelion/KJV-Interlinear/issues
+Contact: open an issue at https://github.com/Divhanthelion/Scriptorium/issues
 
 _Last updated: 2 October 2026_

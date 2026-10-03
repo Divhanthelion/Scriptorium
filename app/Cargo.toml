@@ -1,15 +1,15 @@
 [package]
-name = "kjv-interlinear"
-version = "0.2.1"
+name = "scriptorium"
+version = "0.1.0"
 edition = "2024"
 license = "MIT-0"
-description = "KJV Bible study app with Hebrew and Greek interlinear"
-repository = "https://github.com/Divhanthelion/KJV-Interlinear"
+description = "Scriptorium: a Bible study library of translations, commentaries, cross-references, and the Hebrew and Greek"
+repository = "https://github.com/Divhanthelion/Scriptorium"
 publish = false
 
 [lib]
 # staticlib/cdylib are needed for the iOS and Android builds
-name = "kjv_interlinear_lib"
+name = "scriptorium_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
