@@ -3,7 +3,7 @@
 //! verse alignment, so the Douay-Rheims' Psalm 22 sits beside the KJV's 23), and, if
 //! asked, the Hebrew or Greek the KJV's verses are translated from.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use kjv_library::Library;
 use kjv_library::alignment::Ref;
@@ -93,6 +93,14 @@ enum Chapter {
 }
 
 impl Chapter {
+    /// Its verses' numbers in order, a Psalm title first as "0".
+    fn numbers(&self) -> Vec<String> {
+        match self {
+            Chapter::Core(c) => c.title.iter().map(|_| "0".to_string()).chain(c.verses.iter().map(|v| v.number.to_string())).collect(),
+            Chapter::Library(c) => c.title.iter().map(|_| "0".to_string()).chain(c.verses.iter().map(|v| v.number.clone())).collect(),
+        }
+    }
+
     fn verse(&self, number: &str) -> Option<Vec<Part>> {
         match self {
             Chapter::Core(c) => {
@@ -140,6 +148,46 @@ impl Chapters<'_> {
         }
         &self.kept[&key]
     }
+}
+
+/// The row of a verse only another column has
+const EXTRA: usize = usize::MAX;
+
+/// What has been given so far: each column's verses, and the row each is in.
+struct Given {
+    shown: Vec<HashMap<Ref, usize>>,
+    languages: Vec<&'static str>,
+}
+
+/// Column `i`'s cell in row `row` (of chapter `at`): verses `refs` of translation
+/// `target`, those it hasn't given already. The original-language column gives the
+/// Hebrew, Aramaic, or Greek of the KJV's.
+#[allow(clippy::too_many_arguments)]
+fn cell(chapters: &mut Chapters, given: &mut Given, i: usize, original_column: bool, target: &str, refs: &[Ref], row: usize, at: (&str, u32)) -> Cell {
+    let mut cell = Cell::default();
+    let fresh: Vec<&Ref> = refs.iter().filter(|r| !given.shown[i].contains_key(*r)).collect();
+    if fresh.is_empty() && !refs.is_empty() {
+        cell.above = true;
+    }
+    for r in fresh {
+        given.shown[i].insert(r.clone(), row);
+        let l = label(at, r);
+        if original_column {
+            if let Some(o) = original(chapters.data, r) {
+                if !given.languages.contains(&o.lang) {
+                    given.languages.push(o.lang);
+                }
+                cell.verses.push(CellVerse { label: l, parts: Vec::new(), original: Some(o) });
+            }
+        } else if let Some(Some(parts)) = chapters.get(target, &r.0, r.1).as_ref().map(|c| c.verse(&r.2))
+            && !parts.is_empty()
+        {
+            // (A verse with no text of its own, such as a Psalm title printed as a
+            // heading, isn't given)
+            cell.verses.push(CellVerse { label: l, parts, original: None });
+        }
+    }
+    cell
 }
 
 /// "16"; "22:1" in another chapter; "Ezra 11:1" in another book; "title" for a Psalm title
@@ -199,11 +247,11 @@ pub fn chapter(data: &DataBundle, lib: &Library, args: &ParallelArgs) -> Result<
         Leading { heading: c.heading, prev: c.prev, next: c.next, verses, after: c.view.after }
     };
 
-    let mut shown: Vec<HashSet<Ref>> = vec![HashSet::new(); args.columns.len()];
-    let mut languages: Vec<&'static str> = Vec::new();
+    let mut given = Given { shown: vec![HashMap::new(); args.columns.len()], languages: Vec::new() };
     let mut rows = Vec::with_capacity(leading.len());
     for (number, before) in leading {
         let at: Ref = (code.to_string(), args.chapter, number.clone());
+        let row = rows.len();
         let mut cells = Vec::with_capacity(args.columns.len());
         for (i, id) in args.columns.iter().enumerate() {
             let (target, refs) = if id == ORIGINAL {
@@ -213,33 +261,65 @@ pub fn chapter(data: &DataBundle, lib: &Library, args: &ParallelArgs) -> Result<
             } else {
                 (id.as_str(), lib.map(&lead, id, &at)?)
             };
-            let mut cell = Cell::default();
-            let fresh: Vec<&Ref> = refs.iter().filter(|r| !shown[i].contains(*r)).collect();
-            if fresh.is_empty() && !refs.is_empty() {
-                cell.above = true;
-            }
-            for r in fresh {
-                shown[i].insert(r.clone());
-                let l = label((code, args.chapter), r);
-                if id == ORIGINAL {
-                    if let Some(o) = original(data, r) {
-                        if !languages.contains(&o.lang) {
-                            languages.push(o.lang);
-                        }
-                        cell.verses.push(CellVerse { label: l, parts: Vec::new(), original: Some(o) });
-                    }
-                } else if let Some(Some(parts)) = chapters.get(target, &r.0, r.1).as_ref().map(|c| c.verse(&r.2))
-                    && !parts.is_empty()
-                {
-                    // (A verse with no text of its own, such as a Psalm title printed as a
-                    // heading, isn't given)
-                    cell.verses.push(CellVerse { label: l, parts, original: None });
-                }
-            }
-            cells.push(cell);
+            cells.push(cell(&mut chapters, &mut given, i, id == ORIGINAL, target, &refs, row, (code, args.chapter)));
         }
         rows.push(Row { number, before, cells });
     }
+
+    // Verses a column has that the leading translation doesn't (the KJV's Matthew 17:21
+    // beside the BSB, which leaves it out): rows of their own, numbered "", where they
+    // fall in that column, with nothing in the leading column
+    let mut extra: Vec<(usize, Row)> = Vec::new();
+    for (i, id) in args.columns.iter().enumerate() {
+        if id == ORIGINAL || *id == lead {
+            continue;
+        }
+        let mut held: Vec<(String, u32)> = given.shown[i].keys().map(|r| (r.0.clone(), r.1)).collect();
+        held.sort_by_key(|(b, c)| (books::order(b), *c));
+        held.dedup();
+        for (book, chapter) in held {
+            let numbers = match chapters.get(id, &book, chapter) {
+                Some(c) => c.numbers(),
+                None => continue,
+            };
+            // After the row of the column's verse before it
+            let mut after = 0;
+            for n in numbers {
+                let r: Ref = (book.clone(), chapter, n);
+                if let Some(&row) = given.shown[i].get(&r) {
+                    if row != EXTRA {
+                        after = row + 1;
+                    }
+                    continue;
+                }
+                let has_text = matches!(chapters.get(id, &book, chapter).as_ref().map(|c| c.verse(&r.2)), Some(Some(parts)) if !parts.is_empty());
+                if !has_text || !lib.map(id, &lead, &r)?.is_empty() {
+                    continue;
+                }
+                let mut cells = Vec::with_capacity(args.columns.len());
+                for (j, other) in args.columns.iter().enumerate() {
+                    let (target, refs) = if j == i {
+                        (id.as_str(), vec![r.clone()])
+                    } else if *other == lead {
+                        (other.as_str(), Vec::new())
+                    } else if other == ORIGINAL {
+                        ("kjv", if id == "kjv" { vec![r.clone()] } else { lib.map(id, "kjv", &r)? })
+                    } else {
+                        (other.as_str(), lib.map(id, other, &r)?)
+                    };
+                    cells.push(cell(&mut chapters, &mut given, j, other == ORIGINAL, target, &refs, EXTRA, (code, args.chapter)));
+                }
+                extra.push((after, Row { number: String::new(), before: Vec::new(), cells }));
+            }
+        }
+    }
+    // Last first, so the earlier places stay where they were (and rows for one place
+    // keep their order)
+    extra.sort_by_key(|(at, _)| *at);
+    for (at, row) in extra.into_iter().rev() {
+        rows.insert(at.min(rows.len()), row);
+    }
+    let languages = given.languages;
 
     // The original-language column is named for what it holds here
     let names: Vec<&str> = languages

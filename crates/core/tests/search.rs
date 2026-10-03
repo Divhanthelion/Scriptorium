@@ -132,7 +132,7 @@ fn random_pieces_of_every_source_are_found_where_they_are() {
         for _ in 0..12 {
             let code = &codes[next(codes.len())];
             let texts: Vec<String> = if commentary {
-                lib().commentary_book(&id, code).unwrap().iter().map(|n| kjv_library::notes::text(&n.body)).collect()
+                lib().commentary_book(&id, code).unwrap().iter().map(|n| kjv_library::notes::search_text(&n.body)).collect()
             } else {
                 lib().verses(&id, code).unwrap().iter().map(|v| v.text.clone()).collect()
             };

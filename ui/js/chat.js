@@ -19,7 +19,7 @@ import {
 } from "./backend.js";
 import { APP } from "./brand.js";
 import { compact, compactLimit, contextEditorMoved, fixed, loadCatalogues, openContextEditor, resolve, sizeOf } from "./context.js";
-import { h, icon, replace, timeAgo } from "./dom.js";
+import { h, icon, keepFocus, replace, timeAgo } from "./dom.js";
 import { referenceFinder, renderMarkdown } from "./markdown.js";
 import { sanitizeContext } from "./settings.js";
 
@@ -36,7 +36,8 @@ export const PRESETS = [
   { id: "anthropic", label: "Anthropic (Claude)", kind: "anthropic", baseUrl: "https://api.anthropic.com/v1", model: "claude-opus-5-5" },
   { id: "openai", label: "OpenAI", kind: "openai", baseUrl: "https://api.openai.com/v1" },
   { id: "gemini", label: "Google Gemini", kind: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta" },
-  { id: "deepseek", label: "DeepSeek", kind: "openai", baseUrl: "https://api.deepseek.com/v1" },
+  // Flash: as accurate as Pro in testing (docs/ASSISTANT.md), at a quarter of the cost and twice the speed
+  { id: "deepseek", label: "DeepSeek", kind: "openai", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash" },
   { id: "openrouter", label: "OpenRouter", kind: "openai", baseUrl: "https://openrouter.ai/api/v1" },
   { id: "groq", label: "Groq", kind: "openai", baseUrl: "https://api.groq.com/openai/v1" },
   {
@@ -62,6 +63,8 @@ const chat = {
   // question keeps the context it was asked with (every passage fixed where it was)
   messages: [],
   requestId: null,
+  // Settles once the answer being streamed has ended and been saved
+  answered: Promise.resolve(),
   pendingConsent: null, // text waiting for the reader to allow a provider
   models: new Map(), // providerId -> { list, error, loading }
   size: null, // the context's size (context.js sizeOf)
@@ -85,6 +88,11 @@ const estimateTokens = (text) => Math.ceil(text.length / 3.8);
 function provider(ctx) {
   const ai = ctx.settings.ai;
   return ai.providers.find((p) => p.id === ai.providerId) ?? null;
+}
+
+/** Whether the provider's thinking can be turned off and on ("Think first") */
+function canThink(p) {
+  return p?.preset === "local" || p?.preset === "deepseek";
 }
 
 function modelInfo(ctx) {
@@ -113,7 +121,8 @@ function changeContext(ctx, mutator) {
   else ctx.changeSettings((s) => mutator(s.ai.context));
 }
 
-/** Size the context in use again; the latest request wins. */
+/** Size the context in use now; shown unless a newer sizing has started. Returns the
+ * size either way, for a question being sent with this context. */
 async function refreshSize(ctx) {
   const seq = ++chat.sizing;
   let size;
@@ -122,9 +131,11 @@ async function refreshSize(ctx) {
   } catch (error) {
     size = { key: null, label: "", tokens: 0, verses: 0, passages: [], error: String(error.message ?? error) };
   }
-  if (seq !== chat.sizing) return;
-  chat.size = size;
-  drawBudget(ctx);
+  if (seq === chat.sizing) {
+    chat.size = size;
+    drawBudget(ctx);
+  }
+  return size;
 }
 
 /** Tokens the next request will use before the answer, corrected for this model. */
@@ -144,7 +155,9 @@ function answerTokens(ctx) {
 // ------------------------------------------------------------------ chat panel
 
 export function renderChat(body, ctx) {
-  finder ??= referenceFinder(ctx.state.books);
+  // Every book in the library, not just the translation being read's: an answer about
+  // John links it while the JPS is open, and Tobit while the WEB is
+  finder ??= referenceFinder([...new Map(ctx.state.bibles.flatMap((b) => b.books).map((b) => [b.name, b])).values()]);
   const ai = ctx.settings.ai;
   if (!ai.providers.length) {
     chat.view = null;
@@ -253,7 +266,7 @@ function modelPicker(ctx) {
       group.append(h("option", { value: `${p.id}\n${ai.model}` }, ai.model));
     }
     if (!group.children.length) {
-      group.append(h("option", { value: `${p.id}\n`, disabled: true }, state?.loading ? "Loading models…" : state?.error ? "Couldn't load models" : "No models"));
+      group.append(h("option", { value: `${p.id}\n`, disabled: true }, state?.loading ? "Loading models…" : state?.error ? "Couldn’t load models" : "No models"));
     }
     select.append(group);
   }
@@ -271,13 +284,14 @@ function modelPicker(ctx) {
       s.ai.model = model || null;
     });
     loadModels(ctx);
-    // Redraw: the controls depend on the provider ("Think first" is for your own server)
+    // Redraw: the controls depend on the provider ("Think first" is for some only)
     ctx.refreshPanel();
   });
   const status = chat.models.get(ai.providerId);
-  // Local reasoning models (Qwen, DeepSeek-R1, …) can skip thinking for quick questions
+  // Reasoning models that can skip thinking for quick questions: your own server's
+  // (Qwen, DeepSeek-R1, …) and DeepSeek's
   const think =
-    provider(ctx)?.preset === "local"
+    canThink(provider(ctx))
       ? h(
           "button",
           {
@@ -307,12 +321,17 @@ function modelPicker(ctx) {
         title: "New conversation",
         "data-new-conversation": "",
         onclick: () => {
-          chat.messages = [];
-          chat.current = null;
-          chat.override = null;
-          chat.showHistory = false;
-          ctx.refreshPanel();
-          chat.view?.input.focus();
+          const start = () => {
+            chat.messages = [];
+            chat.current = null;
+            chat.override = null;
+            chat.showHistory = false;
+            ctx.refreshPanel();
+            chat.view?.input.focus();
+          };
+          // At once, unless an answer is still coming: then once it's stopped and saved
+          if (chat.requestId) stopAnswer().then(start);
+          else start();
         },
       },
       icon("plus"),
@@ -387,7 +406,12 @@ function editContext(ctx) {
       chat.size = size;
       drawBudget(ctx);
     },
-    onChange: () => refreshSize(ctx),
+    onChange: () => {
+      refreshSize(ctx);
+      // Back to the button that opened the editor, drawn again while it was open
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) chat.view?.budget.querySelector(".chat-scope-button")?.focus();
+    },
   });
 }
 
@@ -403,7 +427,7 @@ function drawBudget(ctx) {
   const fraction = limit ? Math.min(1, used / Math.max(1, limit - answerTokens(ctx))) : 0;
   const label = none ? "Nothing attached" : size?.error ? "Couldn’t read the passages" : size?.label || (size ? "Nothing yet" : "…");
   const detail = none || !size ? "" : limit ? `≈${compact(used)} of ${compactLimit(limit)} tokens` : `≈${compact(used)} tokens`;
-  replace(
+  keepFocus(v.budget, () => replace(
     v.budget,
     h(
       "button",
@@ -427,7 +451,7 @@ function drawBudget(ctx) {
           { class: "chat-error small" },
           `Too large for this model: it reads ${compactLimit(limit)} tokens, and ${compact(answerTokens(ctx))} are kept free for the answer. Attach less, or choose a model with a larger context window.`,
         ),
-  );
+  ));
   drawSend();
 }
 
@@ -562,7 +586,7 @@ function fillMessage(ctx, node, m) {
   const status =
     m.error ? h("p", { class: "chat-error" }, m.error)
     : m.reason === "length" && !m.content
-      ? h("p", { class: "chat-note" }, "The model used its whole length limit thinking and didn't reach an answer. Try again with “Think first” off, or ask a narrower question.")
+      ? h("p", { class: "chat-note" }, "The model used its whole length limit thinking and didn’t reach an answer. Try again with “Think first” off, or ask a narrower question.")
     : m.reason === "length" ? h("p", { class: "chat-note" }, "The answer reached its length limit.")
     : m.reason === "refusal" ? h("p", { class: "chat-note" }, "The model declined to answer this.")
     : m.reason === "cancelled" ? h("p", { class: "chat-note" }, "Stopped.")
@@ -588,7 +612,23 @@ function fillMessage(ctx, node, m) {
 }
 
 function markdownOptions(ctx) {
-  return { findReferences: finder, onReference: (ref) => ctx.goTo(ref.book, ref.chapter, ref.verse, { fromPanel: true }) };
+  return { findReferences: finder, onReference: (ref) => openReference(ctx, ref) };
+}
+
+/** Open a reference from an answer: in the translation being read if it has the book,
+ * or else the KJV, or else the first translation that has it. */
+function openReference(ctx, ref) {
+  let { book, chapter, verse } = ref;
+  const has = (b, name) => b.books.some((x) => x.name === name);
+  // "Psalm 151:4" is the fourth verse of Psalm 151, a book of its own where it's printed
+  if (book === "Psalms" && chapter === 151 && ctx.state.bibles.some((b) => has(b, "Psalm 151"))) {
+    book = "Psalm 151";
+    chapter = 1;
+  }
+  if (ctx.state.bookMap.has(book)) return ctx.goTo(book, chapter, verse, { fromPanel: true });
+  const order = [ctx.state.bibles.find((b) => b.id === "kjv"), ...ctx.state.bibles].filter(Boolean);
+  const other = order.find((b) => has(b, book));
+  if (other) return ctx.openIn(other.id, book, chapter, verse, { fromPanel: true });
 }
 
 /**
@@ -730,8 +770,8 @@ function drawConsent(ctx) {
       {},
       `Your question, this conversation, and the attached Scripture will be sent to ${host}. `,
       p.preset === "local"
-        ? "That's your own server."
-        : `${p.name}'s terms and privacy policy apply. ${APP.name} doesn't see or keep any of it.`,
+        ? "That’s your own server."
+        : `${p.name}’s terms and privacy policy apply. ${APP.name} doesn’t see or keep any of it.`,
     ),
     h(
       "div",
@@ -770,7 +810,7 @@ async function sendNow(ctx) {
   if (!text) return;
   if (!ai.model) await loadModels(ctx);
   if (!ai.model) {
-    ctx.toast(chat.models.get(p.id)?.error ? "Couldn't reach the model: see the message above" : "Choose a model first");
+    ctx.toast(chat.models.get(p.id)?.error ? "Couldn’t reach the model: see the message above" : "Choose a model first");
     return;
   }
   if (!ai.consent[p.id]) {
@@ -778,20 +818,23 @@ async function sendNow(ctx) {
     drawConsent(ctx);
     return;
   }
-  await refreshSize(ctx);
-  // The panel may have been redrawn while waiting: use what's on screen now
-  const v = chat.view;
-  if (!v) return;
+  // The context as it is now (a sizing started earlier, for a place the reader has
+  // since left, may still be on its way)
+  const size = await refreshSize(ctx);
+  if (!chat.view) return;
   const limit = contextWindow(ctx);
-  if (limit && promptTokens(ctx, text) + answerTokens(ctx) > limit) {
+  if (limit && promptTokens(ctx, text, size.tokens) + answerTokens(ctx) > limit) {
     drawBudget(ctx);
     ctx.toast("Too large for this model: attach less");
     editContext(ctx);
     return;
   }
   const known = await loadCatalogues().catch(() => null);
+  // The panel may have been redrawn while waiting: use what's on screen now
+  const v = chat.view;
+  if (!v) return;
   const context = activeContext(ctx);
-  const spec = chat.size?.spec ?? resolve(ctx, context, known).spec;
+  const spec = size.spec ?? resolve(ctx, context, known).spec;
 
   if (!chat.current) {
     const now = Date.now();
@@ -804,8 +847,8 @@ async function sendNow(ctx) {
   chat.messages.push({
     role: "user",
     content: text,
-    scopeLabel: spec.passages.length ? (chat.size?.label ?? null) : null,
-    context: fixed(ctx, context, known, chat.size),
+    scopeLabel: spec.passages.length ? (size.label || null) : null,
+    context: fixed(ctx, context, known, size.spec ? size : null),
   });
   const answer = { role: "assistant", content: "", reasoning: "", streaming: true };
   chat.messages.push(answer);
@@ -815,7 +858,7 @@ async function sendNow(ctx) {
 
   const id = `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   chat.requestId = id;
-  const sentScopeTokens = chat.size?.tokens ?? 0;
+  const sentScopeTokens = size.tokens ?? 0;
   const estimate = sentScopeTokens + INSTRUCTION_TOKENS + history.reduce((n, m) => n + estimateTokens(m.content), 0);
   const key = calibrationKey(ctx);
   drawMessages(ctx);
@@ -824,6 +867,8 @@ async function sendNow(ctx) {
   drawSend();
 
   const info = modelInfo(ctx);
+  let answered;
+  chat.answered = new Promise((resolve) => { answered = resolve; });
   try {
     await aiChat(
       id,
@@ -836,7 +881,7 @@ async function sendNow(ctx) {
         messages: history,
         maxTokens: answerTokens(ctx),
         thinking: !!info?.adaptiveThinking,
-        enableThinking: p.preset === "local" ? ai.think : null,
+        enableThinking: canThink(p) ? ai.think : null,
       },
       (event) => {
         if (event.type === "text") answer.content += event.text;
@@ -867,11 +912,20 @@ async function sendNow(ctx) {
     drawSend();
     saveCurrent(ctx);
     drawBudget(ctx);
+    answered();
   }
 }
 
 function stop() {
   if (chat.requestId) aiCancel(chat.requestId).catch(() => {});
+}
+
+/** Before leaving the open conversation: an answer still coming is stopped, and saved
+ * with the conversation it belongs to. */
+async function stopAnswer() {
+  if (!chat.requestId) return;
+  stop();
+  await chat.answered;
 }
 
 async function copyAnswer(ctx, m) {
@@ -889,7 +943,7 @@ function report(ctx, m) {
   const question = [...chat.messages].slice(0, chat.messages.indexOf(m)).reverse().find((x) => x.role === "user")?.content ?? "";
   const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
   const body = [
-    "**What's wrong with this answer?**",
+    "**What’s wrong with this answer?**",
     "",
     "",
     `**Model:** ${p?.name ?? "?"} / ${ctx.settings.ai.model ?? "?"}`,
@@ -929,13 +983,14 @@ async function saveCurrent(ctx) {
   try {
     await conversationSave(conversation);
   } catch (error) {
-    ctx.toast(`Couldn't save this conversation: ${error.message ?? error}`);
+    ctx.toast(`Couldn’t save this conversation: ${error.message ?? error}`);
   }
 }
 
 /** Open a saved conversation to read or continue. */
 async function openConversation(ctx, id) {
   try {
+    await stopAnswer();
     const c = await conversationLoad(id);
     chat.messages = (c.messages ?? []).map((m) => ({ ...m, streaming: false }));
     chat.current = { id: c.id, title: c.title, created: c.created, starred: !!c.starred };
@@ -965,7 +1020,7 @@ async function drawHistory(ctx) {
   try {
     list = await conversationsList();
   } catch (error) {
-    replace(v.history, h("p", { class: "chat-error" }, `Couldn't read saved conversations: ${error.message ?? error}`));
+    replace(v.history, h("p", { class: "chat-error" }, `Couldn’t read saved conversations: ${error.message ?? error}`));
     return;
   }
   if (chat.view !== v) return; // redrawn meanwhile
@@ -1045,6 +1100,7 @@ function row(ctx, c) {
       h("div", { class: "conversation-edit" },
         h("span", { class: "grow" }, `Delete “${c.title}”?`),
         h("button", { type: "button", class: "button danger", onclick: async () => {
+          if (chat.current?.id === c.id) await stopAnswer();
           await conversationDelete(c.id);
           if (chat.current?.id === c.id) {
             chat.current = null;
@@ -1072,6 +1128,7 @@ function clearButton(ctx, recent) {
       wrap,
       h("span", { class: "grow" }, `Delete ${recent.length} conversation${recent.length === 1 ? "" : "s"}? Saved ones stay.`),
       h("button", { type: "button", class: "button danger", onclick: async () => {
+        if (chat.current && recent.some((c) => c.id === chat.current.id)) await stopAnswer();
         for (const c of recent) await conversationDelete(c.id);
         if (chat.current && recent.some((c) => c.id === chat.current.id)) {
           chat.current = null;
@@ -1121,13 +1178,13 @@ export function renderAiSettings(ctx) {
       aiKeyStatus(p.id).then((st) => {
         const el = document.querySelector(`[data-key-status="${p.id}"]`);
         if (!el) return;
-        const key = st.stored ? (st.storage === "file" ? "key saved in the app's files" : "key in system keychain") : presetOf(p).keyOptional ? "no key" : "no key yet";
+        const key = st.stored ? (st.storage === "file" ? "key saved in the app’s files" : "key in system keychain") : presetOf(p).keyOptional ? "no key" : "no key yet";
         el.textContent = `${p.baseUrl} · ${key}`;
       }).catch(() => {});
     }
   });
   return [
-    h("p", { class: "setting-note" }, "Chat about the text with your own AI: a server on your network or an API key. Keys are kept in your system's keychain and never leave this device except to the service they belong to."),
+    h("p", { class: "setting-note" }, "Chat about the text with your own AI: a server on your network or an API key. Keys are kept in your system’s keychain and never leave this device except to the service they belong to."),
     list,
     editing.form ? providerForm(ctx) : h("button", { type: "button", class: "button", onclick: () => {
       editing.form = { id: null, preset: "local", name: "", baseUrl: "", key: "", contextWindow: "" };
@@ -1194,7 +1251,7 @@ function providerForm(ctx) {
     try {
       if (f.key.trim()) {
         const where = await aiKeySet(id, f.key);
-        if (where === "file") ctx.toast("No system keychain found: the key is saved in the app's private files");
+        if (where === "file") ctx.toast("No system keychain found: the key is saved in the app’s private files");
       }
     } catch (error) {
       f.status = String(error.message ?? error);
@@ -1275,7 +1332,7 @@ function providerForm(ctx) {
     field("Name", name),
     field("Address", url, preset.hint),
     field("API key", key),
-    field("Context window (tokens)", size, "Only if the service doesn't report it."),
+    field("Context window (tokens)", size, "Only if the service doesn’t report it."),
     status,
     h(
       "div",

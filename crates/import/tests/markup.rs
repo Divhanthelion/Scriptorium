@@ -772,3 +772,11 @@ fn ccel_references() {
     // No reference at all: the printed passage
     assert_eq!(r(r#"<scripRef passage="1 Cor. i. 10">1 Cor. i. 10</scripRef>"#).0, r#"<p><ref to="1CO.1.10">1 Cor. i. 10</ref></p>"#);
 }
+
+#[test]
+fn a_character_escaped_twice_is_the_character() {
+    // Matthew Henry's module has "qu&amp;#226; non": "quâ non"
+    assert_eq!(thml("<p>qu&amp;#226; non pendent, &amp;#x153;uvre</p>"), "<p>quâ non pendent, œuvre</p>");
+    // An escaped ampersand on its own stays one
+    assert_eq!(thml("<p>A &amp; B &amp;c.</p>"), "<p>A &amp; B &amp;c.</p>");
+}

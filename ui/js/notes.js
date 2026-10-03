@@ -187,8 +187,8 @@ export function renderMarkup(body, ctx) {
  * the KJV's numbering at `book` `chapter`:`verse` (chapter 0: the book's introduction;
  * verse 0: the chapter's), in the translation being read, with the Commentary panel open.
  */
-export async function openNote(ctx, { id, label, book, chapter, verse }) {
-  focus = { id, label, at: null };
+export async function openNote(ctx, { id, label, nth = 0, book, chapter, verse }) {
+  focus = { id, label, nth, at: null };
   const c = chapter || 1;
   const v = chapter ? verse : 0;
   let at = { book, chapter: c, verse: v };
@@ -201,7 +201,9 @@ export async function openNote(ctx, { id, label, book, chapter, verse }) {
       // the same numbers
     }
   }
-  await ctx.goTo(at.book, at.chapter, at.verse, { fromPanel: true });
+  // The panel stays open, turning to the note (closing it on a phone, to open it again,
+  // would go back in history after the notes were open, and close them)
+  await ctx.goTo(at.book, at.chapter, at.verse);
   ctx.openPanel("notes", { focus: false });
 }
 
@@ -265,10 +267,12 @@ export async function renderNotes(body, ctx) {
   const verse = ctx.state.selectedVerse ?? 0;
   const where = verse ? ctx.reference(view.book, view.chapter, verse) : `${ctx.heading(view.book, view.chapter)} (introductions)`;
   const mine = ++seq;
+  // This drawing is still wanted: no later one, and the panel still shows notes
+  const current = () => mine === seq && ctx.state.panel === "notes";
   shown = place(ctx);
   // Notes usually arrive at once; only say they're loading when they don't
   const loading = setTimeout(() => {
-    if (mine === seq) replace(body, h("p", { class: "status" }, `Loading notes on ${where}…`));
+    if (current()) replace(body, h("p", { class: "status" }, `Loading notes on ${where}…`));
   }, 150);
   let all;
   let found; // { kjv, same, commentaries }
@@ -283,11 +287,11 @@ export async function renderNotes(body, ctx) {
       : { kjv: "", same: true, commentaries: [] };
   } catch (error) {
     clearTimeout(loading);
-    if (mine === seq) replace(body, h("p", { class: "chat-error" }, `Couldn't load the notes: ${error.message ?? error}`));
+    if (current()) replace(body, h("p", { class: "chat-error" }, `Couldn’t load the notes: ${error.message ?? error}`));
     return;
   }
   clearTimeout(loading);
-  if (mine !== seq) return; // the reader moved on
+  if (!current()) return; // the reader moved on, or opened another panel
   const results = found.commentaries;
   const sections = results
     .filter((c) => c.notes.length)
@@ -330,7 +334,10 @@ export async function renderNotes(body, ctx) {
   );
   if (focus) {
     focus.at = shown;
-    const target = [...body.querySelectorAll(`[data-commentary="${CSS.escape(focus.id)}"] .note`)].find((n) => n.dataset.label === focus.label);
+    // The note by its label, and which of those with the same label (Tyndale has several
+    // introductions to Genesis)
+    const same = [...body.querySelectorAll(`[data-commentary="${CSS.escape(focus.id)}"] .note`)].filter((n) => n.dataset.label === focus.label);
+    const target = same[focus.nth] ?? same[0];
     if (target) {
       if (target.tagName === "DETAILS") target.open = true;
       target.classList.add("is-focus");

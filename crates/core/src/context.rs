@@ -490,7 +490,11 @@ impl<'a> Builder<'a> {
                     } else {
                         k.display
                     };
-                    text = format!("{} {}", name, piece);
+                    text = match piece.split_once(':') {
+                        // Psalm 151's one chapter is in its name: "Psalm 151:1–3"
+                        Some((_, v)) if name.ends_with(|c: char| c.is_ascii_digit()) => format!("{}:{}", name, v),
+                        _ => format!("{} {}", name, piece),
+                    };
                 } else if !chapters && first.chapter == last.chapter && last_chapter == Some(first.chapter) {
                     // Another verse of the same chapter: "Genesis 1:1, 3"
                     text.push_str(", ");
@@ -545,8 +549,11 @@ impl<'a> Builder<'a> {
         if bible == "kjv" {
             return Ok(label);
         }
-        let (kjv, missing) = self.in_translation(bible, verses, "kjv")?;
-        if missing.is_empty() && kjv == verses {
+        // A book the KJV doesn't have (3 Maccabees) isn't numbered differently from it
+        let lib = self.lib;
+        let comparable: Vec<Ref> = verses.iter().filter(|r| lib.kjv_has_book(&r.0)).cloned().collect();
+        let (kjv, missing) = self.in_translation(bible, &comparable, "kjv")?;
+        if missing.is_empty() && kjv == comparable {
             return Ok(label);
         }
         let abbr = self.lib.bible(bible).map_or(bible, |i| i.abbr.as_str());
@@ -586,6 +593,11 @@ impl<'a> Builder<'a> {
                 self.definitions();
             }
             self.text.push_str("</context>\n");
+            // Nothing could be given (the WEB has no Tobit): nothing is attached, and
+            // the passages say why
+            if self.verses == 0 {
+                self.text.clear();
+            }
         }
         Ok(())
     }
@@ -681,12 +693,21 @@ impl<'a> Builder<'a> {
             self.attached.original_inline = true;
         }
         let mut chapter: Option<(String, u32)> = None;
+        // Verses it numbers but leaves empty (the WEB's Acts 8:37, given in a footnote)
+        let mut blank: Vec<Ref> = Vec::new();
         for r in &refs {
+            let words = self.verse_text(t, r)?;
+            if words.trim().is_empty() {
+                // (A Psalm title printed as a heading has no words of its own)
+                if r.2 != "0" {
+                    blank.push(r.clone());
+                }
+                continue;
+            }
             if chapter.as_ref() != Some(&(r.0.clone(), r.1)) {
                 self.text.push_str(&format!("## {}\n", chapter_heading(&r.0, r.1)));
                 chapter = Some((r.0.clone(), r.1));
             }
-            let words = self.verse_text(t, r)?;
             if r.2 == "0" {
                 self.text.push_str("(title) ");
             } else {
@@ -701,6 +722,10 @@ impl<'a> Builder<'a> {
             if self.full() {
                 break;
             }
+        }
+        if !blank.is_empty() && !self.capped {
+            let label = self.refs_label(t, &blank)?;
+            self.text.push_str(&format!("(Left empty in this translation: {}.)\n", label));
         }
         if !missing.is_empty() && !self.capped {
             let from_label = self.refs_label(from, &missing)?;
@@ -1012,6 +1037,11 @@ struct Places {
 /// How the assistant should behave, and what the context holds. Kept free of
 /// anything that changes from turn to turn so providers can cache it with the
 /// context that follows.
+///
+/// Tuned on DeepSeek V4 (see docs/ASSISTANT.md): quotations word for word (omissions
+/// marked), references written in full so the app can link them, and a passage or
+/// translation that isn't attached named as such, with how to attach it, rather than
+/// quoted from memory.
 pub fn instructions(lib: &Library, built: &Built) -> String {
     let a = &built.attached;
     let mut s = String::from(
@@ -1021,13 +1051,15 @@ pub fn instructions(lib: &Library, built: &Built) -> String {
     );
     if built.text.is_empty() {
         s.push_str(
-            "No passage is attached to this conversation. Answer from your knowledge of the Bible, and \
-             give references (Book chapter:verse) the reader can check.\n\n",
+            "No passage is attached to this conversation. Answer from your knowledge of the Bible, and give \
+             references (Book chapter:verse) the reader can check. Wording you give from memory may not be \
+             exact: say so, and tell the reader that to get the exact words of a passage, a translation, or a \
+             commentary, they can attach it with \"Change\" above the conversation.\n\n",
         );
     } else {
         s.push_str(&format!("The reader has attached {} below, inside <context>. Each <passage> holds:\n", built.label));
         let names: Vec<String> =
-            a.translations.iter().filter_map(|id| lib.bible(id)).map(|b| format!("{} ({}, {})", b.name, b.abbr, b.year)).collect();
+            a.translations.iter().filter_map(|id| lib.bible(id)).map(|b| format!("{} [{}], {}", b.name, b.abbr, b.year)).collect();
         s.push_str(&format!(
             "- Its text in {}, inside <bible>. Headings (##) mark chapters, each line starts with its verse \
              number, and \"(title)\" marks a psalm's title. Translations number some verses differently, \
@@ -1052,13 +1084,11 @@ pub fn instructions(lib: &Library, built: &Built) -> String {
                 .commentaries
                 .iter()
                 .filter_map(|id| lib.commentaries().iter().find(|c| &c.id == id))
-                .map(|c| format!("{} ({}, {}; {})", c.name, c.author, c.year, c.tradition))
+                .map(|c| format!("{} by {} ({}; {})", c.name, c.author, c.year, c.tradition))
                 .collect();
             s.push_str(&format!(
                 "- Notes on it from {}, inside <commentary>, each <note> saying which verses it is on (in the \
-                 KJV's numbering). The notes are the published text, unabridged. When you use them, say whose \
-                 view it is rather than presenting it as settled fact, and bear in mind when and where each \
-                 was written.\n",
+                 KJV's numbering). The notes are the published text, unabridged.\n",
                 list(&names)
             ));
         }
@@ -1080,21 +1110,41 @@ pub fn instructions(lib: &Library, built: &Built) -> String {
             );
         }
         s.push_str(
-            "\nWhen you quote Scripture, quote the attached text exactly and give the reference (Book \
-             chapter:verse) and, where more than one translation is attached, the translation. If a \
-             question needs passages that aren't attached, you may draw on your wider knowledge of the \
-             Bible, but say which references you are citing from memory so the reader can check them.\n\n",
+            "\nUsing what is attached:\n\
+             - Quote exactly. Anything in quotation marks must be word for word as it stands in the attached \
+             text, whether Scripture, a note, or a lexicon entry: mark anything you leave out, however short, \
+             with an ellipsis (…) and any word you change with [square brackets]. Never put quotation marks \
+             around a paraphrase, a summary, or words of your own.\n\
+             - Give each quotation its source: Scripture by its reference and, where more than one translation \
+             is attached, the translation; a note by its commentator.\n\
+             - Write references in full, as Book chapter:verse (John 11:37, Romans 4:23-24), never \"v. 37\", \
+             so the reader can open them. Where translations number a verse differently, say whose numbering \
+             you use.\n",
+        );
+        if !a.commentaries.is_empty() {
+            s.push_str(
+                "- Say whose view a note gives rather than presenting it as settled fact, and bear in mind when \
+                 and where each commentary was written.\n",
+            );
+        }
+        s.push_str(
+            "- If the question needs a passage, translation, or commentary that isn't attached, say so, and that \
+             the reader can attach it with \"Change\" above the conversation to get its exact words. You may \
+             still draw on your knowledge of the Bible, but say what you cite from memory, and never present \
+             remembered wording as exact.\n\n",
         );
     }
     s.push_str(
         "Guidelines:\n\
+         - Lead with the answer, then the evidence. Keep it as short as the question allows: a few short \
+         paragraphs for a simple question, more only when it asks for depth. Use lists or headings only when \
+         they help.\n\
          - Distinguish what the text says from how it has been interpreted. Where Christian traditions \
          read a passage differently, say so briefly and fairly instead of presenting one view as the \
          only one.\n\
          - Be careful with the original languages: don't overstate what a word means, and say when a \
          point goes beyond the glosses and standard lexicons.\n\
-         - If you are unsure of a fact, a date, or a reference, say so.\n\
-         - Answer the question asked. Use short paragraphs, and lists or headings only when they help.",
+         - If you are unsure of a fact, a date, or a reference, say so.",
     );
     s
 }

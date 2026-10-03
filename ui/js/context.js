@@ -15,7 +15,7 @@
 // list means the translation being read.
 
 import { call, copyText } from "./backend.js";
-import { h, icon, plural, replace } from "./dom.js";
+import { h, icon, keepFocus, plural, replace } from "./dom.js";
 import { openTranslations } from "./translations.js";
 
 export const FOLLOW = { verse: "This verse", chapter: "This chapter", book: "This book" };
@@ -58,7 +58,7 @@ function codeIn(ctx, id, name) {
   return bible(ctx, id)?.books.find((b) => b.name === name)?.code ?? null;
 }
 
-/** "The one you're reading (WEB)", "KJV" */
+/** "The one you’re reading (WEB)", "KJV" */
 function translationName(ctx, id) {
   if (id === "reading") return `The one you’re reading (${bible(ctx, ctx.settings.translation)?.abbr ?? "KJV"})`;
   return bible(ctx, id)?.abbr ?? id;
@@ -161,9 +161,10 @@ const editor = {
   dialog: null,
   body: null,
   known: null, // the catalogues, once loaded
+  knownError: null, // why they couldn't be
   opts: null, // { get, set, conversation, budget, onChange }
   size: null,
-  sizing: null, // the key being sized
+  sizing: 0, // the latest sizing asked for: an older one finishing later is dropped
   timer: null,
   expanded: new Set(), // passage indexes whose options are open
   adding: "",
@@ -216,9 +217,13 @@ export function openContextEditor(ctx, opts) {
   loadCatalogues().then(
     (known) => {
       editor.known = known;
+      editor.knownError = null;
       if (contextEditorOpen()) draw(ctx);
     },
-    () => {},
+    (error) => {
+      editor.knownError = String(error.message ?? error);
+      if (contextEditorOpen()) draw(ctx);
+    },
   );
 }
 
@@ -243,13 +248,17 @@ function refresh(ctx, delay = 150) {
   clearTimeout(editor.timer);
   editor.timer = setTimeout(async () => {
     const c = editor.opts.get();
+    const mine = ++editor.sizing;
+    let size;
     try {
-      const size = await sizeOf(ctx, c, editor.size);
-      editor.size = size;
-      editor.opts.onSize?.(size);
+      size = await sizeOf(ctx, c, editor.size);
     } catch (error) {
-      editor.size = { error: String(error.message ?? error) };
+      size = { error: String(error.message ?? error) };
     }
+    // The whole Bible takes longer to size than a verse: don't let it land last
+    if (mine !== editor.sizing) return;
+    editor.size = size;
+    if (!size.error) editor.opts.onSize?.(size);
     if (contextEditorOpen()) draw(ctx);
   }, delay);
 }
@@ -272,7 +281,7 @@ function draw(ctx) {
   const c = editor.opts.get();
   const scroll = editor.body.scrollTop;
   const focused = document.activeElement?.dataset?.focusKey;
-  replace(
+  keepFocus(editor.body, () => replace(
     editor.body,
     sizeBar(ctx, c),
     editor.opts.conversation
@@ -311,7 +320,7 @@ function draw(ctx) {
     ),
     section("Saved contexts", saved(ctx, c)),
     previewSection(ctx, c),
-  );
+  ));
   editor.body.scrollTop = scroll;
   if (focused) editor.body.querySelector(`[data-focus-key="${focused}"]`)?.focus();
 }
@@ -366,12 +375,18 @@ function passages(ctx, c) {
   if (!c.passages.length) return h("p", { class: "muted small" }, "No passages yet. Add one below, or let it follow your reading.");
   const s = editor.size;
   const known = knownNow();
+  // Each passage's size from the last sizing, found by what the passage is rather than
+  // where it was: after a removal or a move, until the context is sized again, rows
+  // aren't where they were
+  const now = resolve(ctx, c, editor.known);
+  const sized = (s?.spec?.passages ?? []).map((q) => JSON.stringify(q));
   return h(
     "ol",
     { class: "ctx-passages" },
     c.passages.map((p, i) => {
-      const k = s?.index?.indexOf(i) ?? -1;
-      const size = k >= 0 ? s.passages[k] : null;
+      const k = now.index.indexOf(i);
+      const j = k >= 0 ? sized.indexOf(JSON.stringify(now.spec.passages[k])) : -1;
+      const size = j >= 0 ? (s.passages?.[j] ?? null) : null;
       const open = editor.expanded.has(i);
       const follow = p.follow ? h("span", { class: "ctx-follow" }, `${FOLLOW[p.follow]}, as you read`) : null;
       return h(
@@ -388,6 +403,7 @@ function passages(ctx, c) {
               type: "button",
               class: "text-button ctx-options-button",
               "aria-expanded": String(open),
+              "aria-label": `Options for ${passageLabel(p, size)}${own(p) ? ", changed" : ""}`,
               onclick: () => {
                 if (open) editor.expanded.delete(i);
                 else editor.expanded.add(i);
@@ -432,6 +448,13 @@ function own(p) {
 
 function knownNow() {
   return editor.known ?? null;
+}
+
+/** In place of the commentaries or cross-references until they're known. */
+function notKnown() {
+  return editor.knownError
+    ? h("p", { class: "chat-error small" }, `Couldn’t list them: ${editor.knownError}`)
+    : h("p", { class: "muted small" }, "Loading…");
 }
 
 /** A passage's own choices, each either the same as the rest's or its own. */
@@ -598,7 +621,7 @@ function translations(ctx, list, mutate) {
 
 function commentaries(ctx, list, flipOne) {
   const known = knownNow();
-  if (!known) return h("p", { class: "muted small" }, "Loading…");
+  if (!known) return notKnown();
   // The Treasury is offered as cross-references (with their words), not as its notes
   const lists = new Set(known.crossrefs.map((x) => x.commentary).filter(Boolean));
   return h(
@@ -612,7 +635,7 @@ function commentaries(ctx, list, flipOne) {
 
 function collections(ctx, list, flipOne) {
   const known = knownNow();
-  if (!known) return h("p", { class: "muted small" }, "Loading…");
+  if (!known) return notKnown();
   return h(
     "div",
     { class: "chips ctx-chips", role: "group", "aria-label": "Cross-references" },
@@ -674,6 +697,7 @@ function saved(ctx, c) {
                 {
                   type: "button",
                   class: "button",
+                  "aria-label": `Use ${set.name}`,
                   onclick: () => {
                     editor.expanded.clear();
                     change(ctx, (x) => {

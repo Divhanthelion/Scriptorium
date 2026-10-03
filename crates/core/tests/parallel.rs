@@ -106,6 +106,23 @@ fn a_translation_without_the_book_is_empty_and_the_original_is_named() {
 }
 
 #[test]
+fn verses_the_leading_translation_leaves_out_have_rows_of_their_own() {
+    // The BSB leaves out Matthew 17:21; the KJV has it, after verse 20
+    let p = side_by_side(&["bsb", "kjv", "original"], "Matthew", 17);
+    let at = p.rows.iter().position(|r| r.number.is_empty()).expect("a row for the KJV's verse 21");
+    assert_eq!(p.rows[at - 1].number, "20");
+    assert_eq!(p.rows[at + 1].number, "22");
+    assert!(p.rows[at].cells[0].verses.is_empty() && !p.rows[at].cells[0].above);
+    assert_eq!(cell(&p, at, 1), "21 Howbeit this kind goeth not out but by prayer and fasting.");
+    assert!(p.rows[at].cells[2].verses[0].original.is_some(), "with its Greek");
+    // Every verse of the KJV's chapter, once
+    let kjv: Vec<String> = p.rows.iter().flat_map(|r| r.cells[1].verses.iter().map(|v| v.label.clone())).collect();
+    assert_eq!(kjv, (1..=27).map(|n| n.to_string()).collect::<Vec<_>>());
+    // Only where the leading translation has no counterpart: the KJV leading has none
+    assert!(side_by_side(&["kjv", "bsb"], "Matthew", 17).rows.iter().all(|r| !r.number.is_empty()));
+}
+
+#[test]
 fn aramaic_is_named_where_the_old_testament_is_written_in_it() {
     use kjv_core::models::OriginalLanguage::{Aramaic, Hebrew};
     let lang = |book: &str, c: u32, v: u32| data().extended.get_interlinear(book, c, v).map(|iv| iv.language.clone());
@@ -161,8 +178,15 @@ fn sweep() {
                                 }
                             }
                             // The leading cell is its own verse, or empty where the translation
-                            // numbers a verse it leaves out (Noyes' Matthew 17:21)
+                            // numbers a verse it leaves out (Noyes' Matthew 17:21), or where
+                            // only other columns have the verse
                             let lead = &row.cells[0];
+                            if row.number.is_empty() {
+                                if !lead.verses.is_empty() || row.cells.iter().all(|x| x.verses.is_empty()) {
+                                    problems.push(format!("{} {} {}: a row for other columns' verse isn't one", b.id, e.code, c));
+                                }
+                                continue;
+                            }
                             let words = lib().verses(&b.id, &e.code).unwrap().iter().find(|v| v.chapter == c && v.number == row.number).map(|v| v.text.clone());
                             let empty = words.as_deref().is_some_and(|w| w.trim().is_empty());
                             // (A verse left out but given a footnote saying so is shown, as the

@@ -138,8 +138,12 @@ pub fn text(body: &str) -> String {
                 }
                 ("fn", true) => {
                     footnote = footnote.saturating_sub(1);
+                    // No space inside the brackets (a footnote may end with a line break)
+                    block.truncate(block.trim_end().len());
                     block.push(']');
                 }
+                // (Nor at a footnote's start)
+                ("br", _) if footnote > 0 && block.ends_with('[') => {}
                 ("br", _) => block.push(if footnote > 0 { ' ' } else { '\n' }),
                 _ => {}
             }
@@ -149,7 +153,10 @@ pub fn text(body: &str) -> String {
         let end = rest[first..].find('<').map_or(rest.len(), |i| i + first);
         let raw = &rest[..end];
         rest = &rest[end..];
-        let text = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+        let mut text = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+        if footnote > 0 && block.ends_with('[') {
+            text = text.trim_start().to_string();
+        }
         if small_caps > 0 {
             block.push_str(&text.to_uppercase());
         } else {
@@ -157,8 +164,13 @@ pub fn text(body: &str) -> String {
         }
     }
     flush(&mut block, &prefix, &mut out);
-    // A footnote that starts or ends with a line break: no space inside its brackets
-    out.join("\n").replace("[ ", "[").replace(" ]", "]")
+    out.join("\n")
+}
+
+/// A note as search reads it: its [`text`] without the marks that start its lines
+/// ("### " for a heading, "- " for a list item), which aren't the author's words.
+pub fn search_text(body: &str) -> String {
+    text(body).lines().map(|l| l.trim_start_matches("### ").trim_start().trim_start_matches("- ")).collect::<Vec<_>>().join("\n")
 }
 
 #[cfg(test)]
@@ -180,6 +192,14 @@ mod tests {
             "Line one,\n  indented.\n- item\n  - sub"
         );
         assert_eq!(text("<tr><td>a</td><td>b</td></tr><p>x<br/>y</p><p>z<fn><br/>note</fn></p>"), "a | b\nx\ny\nz [note]");
+        assert_eq!(text("<p>z<fn> note <br/></fn>.</p>"), "z [note].");
+        // The author's own brackets are as printed
+        assert_eq!(text("<p>[ all the four monarchies ]</p>"), "[ all the four monarchies ]");
+    }
+
+    #[test]
+    fn notes_as_search_reads_them() {
+        assert_eq!(search_text("<h>The Case</h><li>item</li><li level=\"2\">sub</li><p>- a dash</p>"), "The Case\nitem\nsub\na dash");
     }
 
     #[test]

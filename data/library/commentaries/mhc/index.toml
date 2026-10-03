@@ -17,8 +17,8 @@ markup = "OSIS"
 encoding = "UTF-8"
 notes = 5360
 books = 66
-characters = 31773485
-body_bytes = 42716679
+characters = 31773010
+body_bytes = 42715919
 source_entries = 5504
 repeats_dropped = 0
 orphans_merged = 6
@@ -61,12 +61,12 @@ characters = 320822
 [[book]]
 code = "1CO"
 notes = 82
-characters = 460007
+characters = 459982
 
 [[book]]
 code = "1JN"
 notes = 30
-characters = 178736
+characters = 178706
 
 [[book]]
 code = "1KI"
@@ -101,7 +101,7 @@ characters = 480102
 [[book]]
 code = "2CO"
 notes = 50
-characters = 181376
+characters = 181371
 
 [[book]]
 code = "2JN"
@@ -126,12 +126,12 @@ characters = 563474
 [[book]]
 code = "2TH"
 notes = 11
-characters = 59370
+characters = 59365
 
 [[book]]
 code = "2TI"
 notes = 16
-characters = 90761
+characters = 90756
 
 [[book]]
 code = "3JN"
@@ -141,7 +141,7 @@ characters = 14861
 [[book]]
 code = "ACT"
 notes = 136
-characters = 1663278
+characters = 1663243
 
 [[book]]
 code = "AMO"
@@ -166,7 +166,7 @@ characters = 711675
 [[book]]
 code = "ECC"
 notes = 53
-characters = 339293
+characters = 339273
 
 [[book]]
 code = "EPH"
@@ -201,7 +201,7 @@ characters = 174374
 [[book]]
 code = "GEN"
 notes = 288
-characters = 1211860
+characters = 1211850
 
 [[book]]
 code = "HAB"
@@ -246,12 +246,12 @@ characters = 1387490
 [[book]]
 code = "JHN"
 notes = 116
-characters = 1775747
+characters = 1775687
 
 [[book]]
 code = "JOB"
 notes = 175
-characters = 1100125
+characters = 1100065
 
 [[book]]
 code = "JOL"
@@ -286,7 +286,7 @@ characters = 499272
 [[book]]
 code = "LUK"
 notes = 132
-characters = 1227026
+characters = 1227016
 
 [[book]]
 code = "MAL"
@@ -296,7 +296,7 @@ characters = 142330
 [[book]]
 code = "MAT"
 notes = 158
-characters = 2065071
+characters = 2064966
 
 [[book]]
 code = "MIC"
@@ -306,7 +306,7 @@ characters = 165521
 [[book]]
 code = "MRK"
 notes = 84
-characters = 549614
+characters = 549579
 
 [[book]]
 code = "NAM"
@@ -321,7 +321,7 @@ characters = 231113
 [[book]]
 code = "NUM"
 notes = 142
-characters = 705114
+characters = 705104
 
 [[book]]
 code = "OBA"
@@ -341,12 +341,12 @@ characters = 114506
 [[book]]
 code = "PRO"
 notes = 547
-characters = 850335
+characters = 850315
 
 [[book]]
 code = "PSA"
 notes = 594
-characters = 2568796
+characters = 2568781
 
 [[book]]
 code = "REV"
@@ -356,7 +356,7 @@ characters = 309079
 [[book]]
 code = "ROM"
 notes = 63
-characters = 646427
+characters = 646407
 
 [[book]]
 code = "RUT"
@@ -366,7 +366,7 @@ characters = 102705
 [[book]]
 code = "SNG"
 notes = 33
-characters = 226039
+characters = 226034
 
 [[book]]
 code = "TIT"

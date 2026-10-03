@@ -85,6 +85,9 @@ pub struct Hit {
     pub verse: u32,
     /// "John 3:16", "Psalm 51 (title)", "Luke 2:8-20", "Romans (introduction)"
     pub reference: String,
+    /// Which of the notes on the same verses this is, from 0 (Tyndale's notes have
+    /// several introductions to Genesis); 0 for a verse
+    pub nth: usize,
     /// The verse, or the words of the note around its first match, with matches marked
     pub segments: Vec<Segment>,
 }
@@ -152,9 +155,11 @@ fn first_match(text: &str, folded: &str) -> Option<(usize, usize)> {
         let before = out.len();
         kjv_library::text::fold_char(c, &mut out);
         from.extend(std::iter::repeat_n(i, out.len() - before));
-        if out.ends_with(folded) {
-            let start = from[out.len() - folded.len()];
-            return Some((start, i + c.len_utf8()));
+        // The match may end inside what one char folds to ("ca" in "Cæsar")
+        for k in before + 1..=out.len() {
+            if out.as_bytes()[..k].ends_with(folded.as_bytes()) {
+                return Some((from[k - folded.len()], i + c.len_utf8()));
+            }
         }
     }
     None
@@ -163,7 +168,7 @@ fn first_match(text: &str, folded: &str) -> Option<(usize, usize)> {
 /// The words of a note around its first match of `query`, with every match in them marked.
 fn snippet(text: &str, query: &str) -> Vec<Segment> {
     // One line, as the result list shows it
-    let flat: String = text.lines().map(|l| l.trim_start_matches("### ").trim_start_matches("- ")).collect::<Vec<_>>().join(" ");
+    let flat: String = text.lines().collect::<Vec<_>>().join(" ");
     let (start, end) = first_match(&flat, &fold_for_search(query)).unwrap_or((0, 0));
     // So many characters either side, widened to whole words
     let mut a = start;
@@ -185,11 +190,13 @@ fn snippet(text: &str, query: &str) -> Vec<Segment> {
         }
     }
     let window = &flat[a..b];
-    let mut out = segments(window.trim_end(), &[], &find_folded_ranges(window.trim_end(), query));
-    if a > 0 {
+    let window = window.trim();
+    let mut out = segments(window, &[], &find_folded_ranges(window, query));
+    // An ellipsis where words are left out (not just spaces)
+    if !flat[..a].trim().is_empty() {
         out.insert(0, Segment { text: "… ".into(), red: false, hit: false });
     }
-    if b < flat.len() {
+    if !flat[b..].trim().is_empty() {
         out.push(Segment { text: " …".into(), red: false, hit: false });
     }
     out
@@ -257,6 +264,7 @@ pub fn search(data: &DataBundle, lib: &Library, args: &SearchArgs) -> Result<Sou
                         verse: v,
                         reference: verse_label(code, c, &v.to_string()),
                         segments: segments(text, &[], &find_folded_ranges(text, query)),
+                        nth: 0,
                     });
                 }
             }
@@ -270,6 +278,7 @@ pub fn search(data: &DataBundle, lib: &Library, args: &SearchArgs) -> Result<Sou
                         verse: v.number.split('-').next().and_then(|n| n.trim_end_matches(|c: char| !c.is_ascii_digit()).parse().ok()).unwrap_or(0),
                         reference: verse_label(code, v.chapter, &v.number),
                         segments: segments(&v.text, &[], &find_folded_ranges(&v.text, query)),
+                        nth: 0,
                     });
                 }
             }
@@ -283,7 +292,8 @@ pub fn search(data: &DataBundle, lib: &Library, args: &SearchArgs) -> Result<Sou
                         chapter: n.from.0,
                         verse: n.from.1,
                         reference: note_label(display, code, n.from, n.to),
-                        segments: snippet(&kjv_library::notes::text(&n.body), query),
+                        segments: snippet(&kjv_library::notes::search_text(&n.body), query),
+                        nth: notes[..d].iter().filter(|m| m.from == n.from && m.to == n.to).count(),
                     });
                 }
             }
@@ -329,13 +339,25 @@ mod tests {
 
     #[test]
     fn snippets_show_the_words_around_the_first_match() {
-        let note = format!("### Heading\n{} Melchizedek king of Salem {}", "word ".repeat(40), "more ".repeat(80));
+        // (Notes as kjv_library::notes::search_text gives them)
+        let note = format!("Heading\n{} Melchizedek king of Salem {}", "word ".repeat(40), "more ".repeat(80));
         let s = text(&snippet(&note, "melchizedek"));
         assert!(s.starts_with("… "), "{}", s);
         assert!(s.contains("[Melchizedek] king of Salem"), "{}", s);
         assert!(s.ends_with(" …"), "{}", s);
-        let short = text(&snippet("### The Case\nOf Abraham.", "abraham"));
+        let short = text(&snippet("The Case\nOf Abraham.", "abraham"));
         assert_eq!(short, "The Case Of [Abraham].");
+        // No ellipsis for nothing but spaces
+        let spaced = format!("{}Abraham.{}", " ".repeat(200), " ".repeat(400));
+        assert_eq!(text(&snippet(&spaced, "abraham")), "[Abraham].");
+    }
+
+    #[test]
+    fn a_match_may_end_inside_a_folded_letter() {
+        // "ca" is the start of "Cæsar" folded ("caesar")
+        let t = "Render unto Cæsar";
+        let (a, b) = first_match(t, "ca").unwrap();
+        assert_eq!(&t[a..b], "Cæ");
     }
 
     #[test]

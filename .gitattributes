@@ -3,3 +3,6 @@
 
 # Library data is byte-identical on every platform (checked against pinned sources)
 data/library/** text eol=lf
+
+# Licence texts the notices are generated from, the same on every platform
+crates/import/licenses/** text eol=lf

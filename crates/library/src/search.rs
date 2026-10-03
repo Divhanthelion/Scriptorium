@@ -11,6 +11,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::text::{fold, words};
 
@@ -68,13 +69,20 @@ impl Corpus {
 }
 
 /// Folded books kept for searching again, the least recently used let go first once
-/// they take more than the limit.
+/// they take more than the limit, but none used in the last minute: searching
+/// everything reads more than fits, and in a plain least-recently-used cache each book
+/// would be let go just before the next search wanted it again. This way the first
+/// books that fit stay, and only the rest are read again.
 pub struct Corpora {
     inner: Mutex<Kept>,
 }
 
+/// How long a book just searched is safe from being let go
+const RECENT: Duration = Duration::from_secs(60);
+
 struct Kept {
-    map: HashMap<String, (Arc<Corpus>, u64)>,
+    /// Each book: its corpus, when it was last used (in order), and when (in time)
+    map: HashMap<String, (Arc<Corpus>, u64, Instant)>,
     clock: u64,
     bytes: usize,
     limit: usize,
@@ -97,26 +105,20 @@ impl Corpora {
     /// The corpus for `key`, made by `make` if it isn't kept. (Made outside the lock:
     /// two searches may make the same book at once, and one copy is kept.)
     pub fn get_or(&self, key: &str, make: impl FnOnce() -> Result<Corpus, String>) -> Result<Arc<Corpus>, String> {
-        {
-            let mut k = self.inner.lock().unwrap();
-            k.clock += 1;
-            let now = k.clock;
-            if let Some((c, used)) = k.map.get_mut(key) {
-                *used = now;
-                return Ok(c.clone());
-            }
+        if let Some(c) = self.inner.lock().unwrap().used(key) {
+            return Ok(c);
         }
         let made = Arc::new(make()?);
         let mut k = self.inner.lock().unwrap();
-        k.clock += 1;
-        let now = k.clock;
-        if let Some((c, used)) = k.map.get_mut(key) {
-            *used = now;
-            return Ok(c.clone());
+        if let Some(c) = k.used(key) {
+            return Ok(c);
         }
-        k.bytes += made.bytes();
-        k.map.insert(key.to_string(), (made.clone(), now));
-        k.trim();
+        if k.room(made.bytes()) {
+            k.clock += 1;
+            let now = k.clock;
+            k.bytes += made.bytes();
+            k.map.insert(key.to_string(), (made.clone(), now, Instant::now()));
+        }
         Ok(made)
     }
 
@@ -126,6 +128,11 @@ impl Corpora {
         k.trim();
     }
 
+    /// Whether `key` is kept.
+    pub fn holds(&self, key: &str) -> bool {
+        self.inner.lock().unwrap().map.contains_key(key)
+    }
+
     /// Bytes of folded text kept now.
     pub fn kept_bytes(&self) -> usize {
         self.inner.lock().unwrap().bytes
@@ -133,10 +140,36 @@ impl Corpora {
 }
 
 impl Kept {
+    /// The corpus for `key`, if kept, marked as just used.
+    fn used(&mut self, key: &str) -> Option<Arc<Corpus>> {
+        self.clock += 1;
+        let now = self.clock;
+        let (c, used, when) = self.map.get_mut(key)?;
+        *used = now;
+        *when = Instant::now();
+        Some(c.clone())
+    }
+
+    /// Make room for `bytes` more, letting go of the least recently used books not used
+    /// in the last minute. Whether there is room now.
+    fn room(&mut self, bytes: usize) -> bool {
+        while self.bytes + bytes > self.limit {
+            let Some(oldest) = self.map.iter().filter(|(_, (_, _, when))| when.elapsed() >= RECENT).min_by_key(|(_, (_, used, _))| *used).map(|(k, _)| k.clone())
+            else {
+                return false;
+            };
+            if let Some((c, _, _)) = self.map.remove(&oldest) {
+                self.bytes -= c.bytes();
+            }
+        }
+        true
+    }
+
+    /// Down to the limit, however recently used.
     fn trim(&mut self) {
-        while self.bytes > self.limit && self.map.len() > 1 {
-            let Some(oldest) = self.map.iter().min_by_key(|(_, (_, used))| *used).map(|(k, _)| k.clone()) else { break };
-            if let Some((c, _)) = self.map.remove(&oldest) {
+        while self.bytes > self.limit {
+            let Some(oldest) = self.map.iter().min_by_key(|(_, (_, used, _))| *used).map(|(k, _)| k.clone()) else { break };
+            if let Some((c, _, _)) = self.map.remove(&oldest) {
                 self.bytes -= c.bytes();
             }
         }
@@ -415,19 +448,28 @@ mod tests {
     }
 
     #[test]
-    fn kept_corpora_stay_under_the_limit() {
+    fn kept_corpora_stay_under_the_limit_and_keep_the_first_that_fit() {
         let kept = Corpora::new(100);
+        let book = || Ok(Corpus::new(["0123456789012345678901234567890123456789"]));
         for i in 0..10 {
-            kept.get_or(&format!("k{i}"), || Ok(Corpus::new(["0123456789012345678901234567890123456789"]))).unwrap();
+            kept.get_or(&format!("k{i}"), book).unwrap();
         }
         assert!(kept.kept_bytes() <= 100, "{}", kept.kept_bytes());
-        // The most recent is kept
-        let mut made = false;
-        kept.get_or("k9", || {
-            made = true;
-            Ok(Corpus::new(["x"]))
-        })
-        .unwrap();
-        assert!(!made);
+        // Searching everything again finds the first books still there (a plain
+        // least-recently-used cache would have let each go just before it was wanted)
+        assert!(kept.holds("k0") && !kept.holds("k9"));
+        let mut made = 0;
+        for i in 0..10 {
+            kept.get_or(&format!("k{i}"), || {
+                made += 1;
+                book()
+            })
+            .unwrap();
+        }
+        assert!(made < 10, "{made} of 10 made again");
+        assert!(kept.holds("k0") && !kept.holds("k9"));
+        // A smaller limit lets go of what's over it, however recently used
+        kept.set_limit(0);
+        assert_eq!(kept.kept_bytes(), 0);
     }
 }

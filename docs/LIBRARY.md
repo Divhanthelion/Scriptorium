@@ -219,16 +219,22 @@ these hard cases.
   its verses, and every other column gives what it has for that verse, found through
   the verse alignment and numbered as that translation numbers it, so the
   Douay-Rheims' Psalm 22:1 sits beside the KJV's Psalm 23 title and verse 1, given
-  once, with "With the verse above" where a column's verse spans two rows. A column can
-  be the Hebrew, Aramaic, or Greek behind the KJV's verses, named for the languages in
-  the chapter (Daniel 2: "Hebrew & Aramaic"). On a phone the columns stack under each
-  verse, each named. Panels show the chosen commentaries and cross-references for the
-  selected verse.
+  once, with "With the verse above" where a column's verse spans two rows. A verse the
+  leading translation leaves out but another column has (the KJV's Matthew 17:21 beside
+  the BSB) gets a row of its own where it falls, empty in the leading column. A column
+  can be the Hebrew, Aramaic, or Greek behind the KJV's verses, named for the languages
+  in the chapter (Daniel 2: "Hebrew & Aramaic"). Where the reader is too narrow for the
+  columns (on a phone, or beside a panel), they stack under each verse, each named.
+  Books the KJV doesn't have (3 Maccabees, Psalm 151) are matched verse for verse by
+  number. Panels show the chosen commentaries and cross-references for the selected
+  verse.
 
 ## Search
 
 Search finds what it always has (case, curly quotes, dashes, and "æ" set aside,
-anywhere in a verse, across words), now in any source
+anywhere in a verse, across words), now in any source. Greek typed on a keyboard finds
+Greek printed with polytonic accents (Chrysostom's λόγος, its ό an oxia, is found by
+λόγος typed with a tonos), and final ς is σ
 (`crates/core/src/search.rs`, `ui/js/search.js`):
 
 - **By default it searches the translation being read.** The other choices are
@@ -242,7 +248,11 @@ anywhere in a verse, across words), now in any source
   marked.
 - **Each book is folded once** (`crates/library/src/search.rs`) and kept for searching
   again, up to 256 MB of folded text on a computer and 64 MB on a phone; a search
-  scans the folded text, so results are exact.
+  scans the folded text, so results are exact. Everything folded is about 315 MB, more than
+  is kept: books searched in the last minute are never let go to make room, so
+  searching everything again finds the first books that fitted still there (and reads
+  only the rest again), where a cache that let the least recently used go would have
+  let each one go just before it was wanted.
 - **A word index**, made with the archive, lists for every word the books it occurs in
   (200,000 words, 2,989 books: 8 MB, 2.9 MB compressed in the app). A book is read only if, for
   each run of letters and digits in the query, it holds a word containing it; so a
@@ -294,7 +304,10 @@ What the study assistant reads with each question is the reader's to choose
 
 Every other translation's text is found verse by verse through the verse alignment;
 commentaries and cross-references through the KJV's verses. A translation that leaves
-a verse out says so ("Not in this translation: Matthew 17:21 in the KJV"). The KJV's
+a verse out says so ("Not in this translation: Matthew 17:21 in the KJV"), and so does
+one that numbers a verse but leaves it empty ("Left empty in this translation: Acts
+8:37", in the WEB, which gives it in a footnote). A context in which nothing could be
+given (Tobit in the WEB) is sent as nothing attached, and the passage says why. The KJV's
 66 books come from the app's KJV, so they read exactly as the reader shows them.
 Commentaries give their notes on any of the passage's verses, and their chapter and
 book introductions with whole chapters (a book's with its first). A note reached from

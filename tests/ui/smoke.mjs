@@ -270,7 +270,9 @@ await test("Parallel: translations side by side, verse by verse in each one's nu
 await test("Parallel on a phone: the columns stack, each named", "book=John&chapter=3&view=parallel&tr=kjv", { width: 390, height: 844, mobile: true }, `
   await until(() => $(".parallel-reading"), "parallel");
   const cell = $("#v16 .pr-cell");
-  assert(getComputedStyle(cell, "::before").content === '"KJV"', "named: " + getComputedStyle(cell, "::before").content);
+  // (Its alternative text for screen readers is empty: they have the cell's own name)
+  assert(getComputedStyle(cell, "::before").content.startsWith('"KJV"'), "named: " + getComputedStyle(cell, "::before").content);
+  assert(cell.getAttribute("role") === "group" && cell.getAttribute("aria-label") === "King James Version", "named for screen readers");
   assert(cell.textContent.startsWith("16 For God so loved"), "the name isn't part of the text: " + cell.textContent);
   const [a, b] = $("#v16").querySelectorAll(".pr-cell");
   assert(b.getBoundingClientRect().top >= a.getBoundingClientRect().bottom - 1, "stacked");
@@ -278,6 +280,76 @@ await test("Parallel on a phone: the columns stack, each named", "book=John&chap
   // Back to the plain text (settings persist between tests)
   [...$$("[data-view-switch] button")].filter(visible)[0].click();
   await until(() => !$(".parallel-reading"), "plain text");
+`);
+
+await test("Parallel: a verse only another column has gets a row of its own, and copying takes every column", "book=Matthew&chapter=17&tr=bsb&view=parallel", {}, `
+  await until(() => $(".parallel-reading"), "parallel");
+  const names = () => $$(".pr-column-name").map((c) => c.textContent);
+  if (!names().includes("KJV")) {
+    $$(".pr-bar .chip").find((b) => b.textContent === "Translation").click();
+    await until(() => $("#translations").open, "picker");
+    $$("#translations .translation-item").find((b) => b.querySelector(".translation-abbr").textContent === "KJV").click();
+    await until(() => names().includes("KJV"), "the KJV beside the BSB");
+  }
+  assert(names()[0] === "BSB", "the BSB leads: " + names());
+  const k = names().indexOf("KJV");
+  // The BSB leaves out Matthew 17:21; the KJV's is given after verse 20, not selectable
+  const rows = $$(".pr-row");
+  const extra = rows.find((r) => !r.dataset.verse);
+  assert(extra, "a row for the KJV's verse 21");
+  assert(rows[rows.indexOf(extra) - 1].dataset.verse === "20" && rows[rows.indexOf(extra) + 1].dataset.verse === "22", "between 20 and 22");
+  const cells = [...extra.querySelectorAll(".pr-cell")];
+  assert(cells[0].textContent === "Not in this translation", "empty in the BSB: " + cells[0].textContent);
+  assert(cells[k].textContent.startsWith("21 Howbeit this kind goeth not out but by prayer and fasting."), "the KJV's verse: " + cells[k].textContent);
+  extra.click();
+  await wait(100);
+  assert($("#verse-actions").hidden, "not selected");
+  // Copying a verse copies every column
+  let copied = null;
+  navigator.clipboard.writeText = async (t) => { copied = t; };
+  $("#v20").click();
+  await until(() => !$("#verse-actions").hidden, "verse actions");
+  $('[data-action="copy-verse"]').click();
+  await until(() => copied, "copied");
+  const lines = copied.split("\\n");
+  assert(lines[0] === "Matthew 17:20", "the reference: " + lines[0]);
+  assert(lines[1].startsWith("BSB: ") && lines[1 + k].startsWith("KJV: And Jesus said unto them, Because of your unbelief"), "each column, named: " + copied);
+  // Back to the KJV, plain text (settings persist between tests)
+  [...$$("[data-view-switch] button")].filter(visible)[0].click();
+  await until(() => !$(".parallel-reading"), "plain text");
+  $("#translation-button").click();
+  await until(() => $("#translations").open, "translation picker");
+  $$(".translation-item").find((b) => b.querySelector(".translation-abbr").textContent === "KJV").click();
+  await until(() => $("#translation-label").textContent === "KJV" && $("#reader").getAttribute("aria-busy") === "false", "back to the KJV");
+`);
+
+await test("Search: nothing chosen, Greek accents, and keys inside a dialog", "book=John&chapter=3&panel=search&tr=kjv", {}, `
+  await until(() => $("#search-input"), "search");
+  const input = $("#search-input");
+  input.value = "love";
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+  await until(() => $("#panel-body .result-summary"), "results");
+  assert($('#panel-body [role="status"]').textContent === $("#panel-body .result-summary").textContent, "one line for screen readers: " + $('#panel-body [role="status"]').textContent);
+  // "Choose…" with nothing chosen yet: nothing searched, and no error
+  $$('[aria-label="Search in"] button').find((b) => b.textContent === "Choose…").click();
+  await until(() => $$("#panel-body p").some((p) => p.textContent === "Choose what to search."), "asked to choose");
+  await wait(300);
+  assert(!$("#panel-body .result-summary"), "nothing searched");
+  $$('[aria-label="Search in"] button')[0].click();
+  await until(() => $("#panel-body .result-summary"), "the KJV again");
+  // Greek as a keyboard types it (tonos) finds Chrysostom's (oxia)
+  const r = await (await fetch("/api/search_source", { method: "POST", body: JSON.stringify({ query: "\u03bb\u03cc\u03b3\u03bf\u03c2", kind: "commentary", source: "chrysostom", scope: "all", book: null, limit: 5 }) })).json();
+  assert(r.total > 0 && r.hits[0].segments.some((x) => x.hit), "found and marked: " + JSON.stringify(r).slice(0, 200));
+  // Keys pressed in a dialog stay in it: no turning the page, no closing the panel behind
+  $("#translation-button").click();
+  await until(() => $("#translations").open, "translations");
+  const inside = $("#translations button");
+  inside.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  inside.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await wait(300);
+  assert($("#ref-label").textContent === "John 3", "still John 3: " + $("#ref-label").textContent);
+  assert(!$("#panel").hidden, "the panel stays open");
+  $("#translations").close();
 `);
 
 await test("About and Licences: every work's licence and credit, and every package's notice", "book=John&chapter=1&tr=kjv", {}, `
@@ -369,7 +441,8 @@ await aiSettings({});
 await test("Chat asks consent, then streams an answer about the attached chapter", "book=John&chapter=11&verse=35", {}, `${CHAT_HELPERS}
   $('[data-open-panel="chat"]').click();
   await until(() => $(".chat-model")?.value.endsWith("mock-model"), "model list");
-  assert($(".chat-scope-label").textContent === "Reads: John 11", "chapter attached: " + $(".chat-scope-label").textContent);
+  // (Sized once the library is read: on a slow machine, after the models are listed)
+  await until(() => $(".chat-scope-label").textContent === "Reads: John 11", "chapter attached: " + $(".chat-scope-label").textContent, 15000);
   assert($(".chat-scope-size").textContent === "≈2k of 32k tokens", "budget: " + $(".chat-scope-size").textContent);
   await ask("Why did Jesus weep?");
   await until(() => !$(".chat-consent").hidden, "consent prompt");

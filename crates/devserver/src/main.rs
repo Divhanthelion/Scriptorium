@@ -123,30 +123,26 @@ fn handle(state: &State, mut request: Request) {
         // the bodies it encodes itself
         let events = chat(state, args);
         let mut out = request.into_writer();
-        let head = "HTTP/1.1 200 OK
-Content-Type: application/x-ndjson
-Cache-Control: no-store
-Transfer-Encoding: chunked
-Connection: close
-
-";
+        // (HTTP lines end in CRLF, written as escapes: a source file's line endings change
+        // with the checkout)
+        let head = "HTTP/1.1 200 OK\r\n\
+                    Content-Type: application/x-ndjson\r\n\
+                    Cache-Control: no-store\r\n\
+                    Transfer-Encoding: chunked\r\n\
+                    Connection: close\r\n\r\n";
         let mut write = |bytes: &[u8]| out.write_all(bytes).and_then(|()| out.flush());
         if write(head.as_bytes()).is_err() {
             return;
         }
         for line in events {
-            let mut chunk = format!("{:x}
-", line.len()).into_bytes();
+            let mut chunk = format!("{:x}\r\n", line.len()).into_bytes();
             chunk.extend_from_slice(&line);
-            chunk.extend_from_slice(b"
-");
+            chunk.extend_from_slice(b"\r\n");
             if write(&chunk).is_err() {
                 return;
             }
         }
-        let _ = write(b"0
-
-");
+        let _ = write(b"0\r\n\r\n");
         return;
     }
     let result = match name.as_str() {

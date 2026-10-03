@@ -134,12 +134,14 @@ export async function renderXrefs(body, ctx) {
   if (moved) unlimited = new Set();
   shown = here;
   const mine = ++seq;
+  // This drawing is still wanted: no later one, and the panel still shows cross-references
+  const current = () => mine === seq && ctx.state.panel === "xrefs";
   const where = verse ? ctx.reference(view.book, view.chapter, verse) : ctx.heading(view.book, view.chapter);
   const redraw = () => renderXrefs(body, ctx);
   // References usually arrive at once; only say they're loading when they don't (and
   // not when showing more of the same place, which would lose the reader's scroll)
   const loading = setTimeout(() => {
-    if (mine === seq && moved) replace(body, h("p", { class: "status" }, `Loading cross-references for ${where}…`));
+    if (current() && moved) replace(body, h("p", { class: "status" }, `Loading cross-references for ${where}…`));
   }, 150);
   let all;
   let found = null; // { kjv, same, collections }
@@ -160,11 +162,11 @@ export async function renderXrefs(body, ctx) {
     }
   } catch (error) {
     clearTimeout(loading);
-    if (mine === seq) replace(body, h("p", { class: "chat-error" }, `Couldn't load the cross-references: ${error.message ?? error}`));
+    if (current()) replace(body, h("p", { class: "chat-error" }, `Couldn’t load the cross-references: ${error.message ?? error}`));
     return;
   }
   clearTimeout(loading);
-  if (mine !== seq) return; // the reader moved on
+  if (!current()) return; // the reader moved on, or opened another panel
   if (!verse) {
     replace(body, h("p", { class: "notes-where" }, `${where}. Select a verse for its cross-references.`), chooser(ctx, all));
     return;

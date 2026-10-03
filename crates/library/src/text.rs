@@ -1,14 +1,28 @@
 //! Text folded for searching: case and typography set aside, so "Moses’" finds
-//! "moses'" and "Caesar" finds "Cæsar".
+//! "moses'", "Caesar" finds "Cæsar", and Greek typed with a keyboard's accents finds
+//! it printed with the polytonic ones.
 
 /// Fold one char for case/typography-insensitive search.
-/// Curly apostrophes match straight ones and "æ" matches "ae" (Cæsar ↔ Caesar).
+/// Curly apostrophes match straight ones and "æ" matches "ae" (Cæsar ↔ Caesar). Greek
+/// vowels with an oxia (U+1F71…, as Chrysostom's Greek is printed) are the same letters
+/// as with a tonos (U+03AC…, as Greek keyboards type them), so they fold together, and
+/// final sigma is sigma (as "Σ" lower-cased is).
 pub fn fold_char(c: char, out: &mut String) {
     match c {
         '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{02BC}' => out.push('\''),
         '\u{201C}' | '\u{201D}' => out.push('"'),
         '\u{2010}'..='\u{2014}' => out.push('-'),
         'æ' | 'Æ' => out.push_str("ae"),
+        '\u{1F71}' | '\u{1FBB}' => out.push('\u{03AC}'),
+        '\u{1F73}' | '\u{1FC9}' => out.push('\u{03AD}'),
+        '\u{1F75}' | '\u{1FCB}' => out.push('\u{03AE}'),
+        '\u{1F77}' | '\u{1FDB}' => out.push('\u{03AF}'),
+        '\u{1F79}' | '\u{1FF9}' => out.push('\u{03CC}'),
+        '\u{1F7B}' | '\u{1FEB}' => out.push('\u{03CD}'),
+        '\u{1F7D}' | '\u{1FFB}' => out.push('\u{03CE}'),
+        '\u{1FD3}' => out.push('\u{0390}'),
+        '\u{1FE3}' => out.push('\u{03B0}'),
+        '\u{03C2}' => out.push('\u{03C3}'),
         c if c.is_whitespace() => out.push(' '),
         c => out.extend(c.to_lowercase()),
     }
@@ -67,6 +81,17 @@ mod tests {
     fn folded_search_matches_apostrophe_and_ae() {
         assert_eq!(fold("Moses\u{2019} seat"), fold("moses' SEAT"));
         assert_eq!(fold("Cæsar"), "caesar");
+    }
+
+    #[test]
+    fn greek_oxia_and_tonos_fold_together() {
+        // λόγος and Ἀλλά as Chrysostom's text prints them, and as a keyboard types them
+        assert_eq!(fold("\u{03BB}\u{1F79}\u{03B3}\u{03BF}\u{03C2}"), fold("\u{03BB}\u{03CC}\u{03B3}\u{03BF}\u{03C2}"));
+        assert_eq!(fold("\u{1F08}\u{03BB}\u{03BB}\u{1F71}"), fold("\u{1F08}\u{03BB}\u{03BB}\u{03AC}"));
+        // Capitals too
+        assert_eq!(fold("\u{1FF9}"), fold("\u{038C}"));
+        let text = "\u{03BB}\u{1F79}\u{03B3}\u{03BF}\u{03C2}";
+        assert_eq!(find_folded(text, "\u{039B}\u{038C}\u{0393}\u{039F}\u{03A3}"), [(0, text.len())]);
     }
 
     #[test]

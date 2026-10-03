@@ -38,10 +38,6 @@ export function setPickerBooks(list) {
   books = list;
 }
 
-export function isPickerOpen() {
-  return dialog?.open ?? false;
-}
-
 export function openPicker(book, chapter) {
   current = { book, chapter };
   showBooks();
@@ -50,10 +46,6 @@ export function openPicker(book, chapter) {
   const active = body.querySelector('[aria-current="true"]');
   (active ?? body.querySelector("input"))?.focus();
   active?.scrollIntoView({ block: "center" });
-}
-
-export function closePicker() {
-  if (dialog.open) dialog.close();
 }
 
 function bookButton(book) {

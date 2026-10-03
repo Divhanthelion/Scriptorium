@@ -188,7 +188,7 @@ fn other_translations_are_found_verse_by_verse() {
     assert_eq!(parts.iter().map(|p| (p.id.as_str(), p.empty)).collect::<Vec<_>>(), [("kjv", false), ("bsb", false), ("jps", true)]);
     let instructions = context::instructions(lib(), &c);
     assert!(
-        instructions.contains("King James Version (KJV, 1611 (1769 text)), Berean Standard Bible (BSB, 2023), and JPS Tanakh (JPS, 1917)"),
+        instructions.contains("King James Version [KJV], 1611 (1769 text), Berean Standard Bible [BSB], 2023, and JPS Tanakh [JPS], 1917"),
         "{}",
         instructions
     );
@@ -203,7 +203,8 @@ fn commentaries_give_each_note_once_with_introductions_for_whole_chapters() {
     assert!(c.text.contains("<note on=\"Luke 2:8-20\">(Given above, with Luke 2:10.)</note>"));
     assert!(c.text.contains("<commentary name=\"Matthew Henry's Complete Commentary\" author=\"Matthew Henry\" year=\"1706–1721\">"));
     let instructions = context::instructions(lib(), &c);
-    assert!(instructions.contains("Matthew Henry's Complete Commentary (Matthew Henry, 1706–1721;"), "{}", instructions);
+    assert!(instructions.contains("Matthew Henry's Complete Commentary by Matthew Henry (1706–1721;"), "{}", instructions);
+    assert!(instructions.contains("Say whose view a note gives"), "{}", instructions);
 
     // Introductions come with whole chapters: the book's with its first
     let notes_on = |refs: &str, id: &str| {

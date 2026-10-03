@@ -2,11 +2,11 @@
 
 import { call, copyText } from "./backend.js";
 import { APP } from "./brand.js";
-import { h, icon, replace } from "./dom.js";
+import { h, icon, keepFocus, replace } from "./dom.js";
 import { chatScopeChanged, renderChat } from "./chat.js";
 import { renderSaved, renderSettings, renderStrongs } from "./panels.js";
 import { renderSearch } from "./search.js";
-import { closePicker, initPicker, isPickerOpen, openPicker, setPickerBooks } from "./picker.js";
+import { initPicker, openPicker, setPickerBooks } from "./picker.js";
 import { libraryVerseText, markSelected, renderChapter, renderLibraryChapter, renderParallel } from "./reader.js";
 import { initTranslations, openTranslations } from "./translations.js";
 import { notesStale, renderNotes } from "./notes.js";
@@ -23,7 +23,7 @@ const desktop = window.matchMedia("(min-width: 900px)");
 
 const PANELS = {
   search: { title: "Search", render: renderSearch },
-  strongs: { title: "Strong's & Lexicon", render: renderStrongs },
+  strongs: { title: "Strong’s & Lexicon", render: renderStrongs },
   saved: { title: "Saved", render: renderSaved },
   notes: { title: "Commentary", render: renderNotes, stale: notesStale },
   xrefs: { title: "Cross-references", render: renderXrefs, stale: xrefsStale },
@@ -275,9 +275,36 @@ function libraryCopyText({ verse }) {
   return `${view.heading} ${view.abbr}\n${lines.join("\n")}\n`;
 }
 
+/** Clipboard text for translations side by side: the reference, then each column's
+ * words, named, with its own verse number where it differs ("DRA (22:1)"). */
+function parallelCopyText({ verse }) {
+  const view = state.chapter;
+  const cellText = (row, cell) => {
+    if (cell.above) return "(with the verse above)";
+    if (!cell.verses.length) return "(not in this translation)";
+    return cell.verses
+      .map((v) => {
+        const text = v.original ? v.original.words.map((w) => w.text).join(" ") : libraryVerseText({ parts: v.parts ?? [] });
+        const own = v.label !== row.number && !(v.label === "title" && row.number === "0");
+        return own ? `(${v.label}) ${text}` : text;
+      })
+      .join(" ");
+  };
+  const lines = (row) => view.columns.map((c, i) => `${c.abbr}: ${cellText(row, row.cells[i])}`).join("\n");
+  if (verse) {
+    const row = view.rows.find((r) => r.number !== "0" && parseInt(r.number, 10) === verse);
+    return row ? `${reference(view.book, view.chapter, verse)}\n${lines(row)}` : "";
+  }
+  // A row for a verse only other columns have is named by their number for it
+  const name = (r) => (r.number === "0" ? "Title" : r.number || (r.cells.find((c) => c.verses.length)?.verses[0].label ?? ""));
+  const rows = view.rows.map((r) => `${name(r)}\n${lines(r)}`);
+  return `${view.heading}\n\n${rows.join("\n\n")}\n`;
+}
+
 async function copy(args, message) {
   try {
-    await copyText(state.chapter?.library ? libraryCopyText(args) : await call("copy_text", args));
+    const view = state.chapter;
+    await copyText(view?.parallel ? parallelCopyText(args) : view?.library ? libraryCopyText(args) : await call("copy_text", args));
     toast(message);
   } catch (error) {
     toast("Could not copy to the clipboard");
@@ -297,12 +324,12 @@ function toggleBookmark() {
 }
 
 let toastTimer = null;
-function toast(message) {
+function toast(message, ms = 1800) {
   const el = $("toast");
   el.textContent = message;
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
+  toastTimer = setTimeout(() => el.classList.remove("show"), ms);
 }
 
 // ------------------------------------------------------------------ panels
@@ -320,7 +347,7 @@ function openPanel(name, { focus = true, section = null } = {}) {
   syncNavState();
   // On phones the panel covers the reader: let the system back gesture close it
   if (!desktop.matches && !wasOpen) history.pushState({ panel: name }, "");
-  if (focus) (input ?? $("panel-close")).focus();
+  if (focus) (input instanceof HTMLElement ? input : $("panel-close")).focus();
 }
 
 /** Whether the open panel shows the selected verse (commentary, cross-references) and
@@ -333,9 +360,9 @@ function refreshPanel() {
   if (!state.panel) return;
   const scroll = panelBody.scrollTop;
   const active = document.activeElement?.id;
-  PANELS[state.panel].render(panelBody, ctx);
+  keepFocus(panelBody, () => PANELS[state.panel].render(panelBody, ctx));
   panelBody.scrollTop = scroll;
-  if (active) $(active)?.focus();
+  if (active && !panelBody.contains(document.activeElement)) $(active)?.focus();
 }
 
 function closePanel({ fromHistory = false } = {}) {
@@ -560,9 +587,43 @@ function isTyping(target) {
   return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 }
 
+/** The dialog open over everything (books, translations, the context editor,
+ * licences), if one is. */
+function openDialog() {
+  return document.querySelector("dialog[open]");
+}
+
+/** Arrow keys move between the options of a radio group (view switch, segmented
+ * controls). Returns whether the key was one. */
+function moveInRadioGroup(event) {
+  const group = event.target.closest?.("[role=radiogroup]");
+  if (!group || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return false;
+  event.preventDefault();
+  const radios = [...group.querySelectorAll("[role=radio]")].filter((r) => r.offsetParent !== null);
+  const i = radios.indexOf(event.target);
+  const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+  const next = radios[(i + step + radios.length) % radios.length];
+  const label = next.textContent;
+  // The click may draw the group again: find it by its name and, where several
+  // share one (a passage's options in the context editor), by which of them it was
+  const name = (g) => g.getAttribute("aria-label") ?? g.getAttribute("aria-labelledby");
+  const named = () => [...document.querySelectorAll("[role=radiogroup]")].filter((g) => name(g) === name(group) && g.offsetParent !== null);
+  const rank = named().indexOf(group);
+  next.click();
+  const again = [...(named()[rank]?.querySelectorAll("[role=radio]") ?? [])].find((r) => r.textContent === label);
+  (again ?? next).focus();
+  return true;
+}
+
 function onKeydown(event) {
   const mod = event.ctrlKey || event.metaKey;
   const key = event.key.toLowerCase();
+
+  // Keys are the dialog's while one is open: nothing reaches the reader or the panel behind
+  if (openDialog()) {
+    if (!mod && !event.altKey && !isTyping(event.target)) moveInRadioGroup(event);
+    return;
+  }
 
   if (mod && key === "f") {
     event.preventDefault();
@@ -575,8 +636,8 @@ function onKeydown(event) {
     else openPanel("chat");
     return;
   }
-  if (isPickerOpen() || isTyping(event.target)) {
-    if (event.key === "Escape" && isTyping(event.target) && state.panel) {
+  if (isTyping(event.target)) {
+    if (event.key === "Escape" && state.panel) {
       event.preventDefault();
       closePanel();
     }
@@ -600,24 +661,7 @@ function onKeydown(event) {
   }
   if (mod || event.altKey) return;
 
-  // Arrow keys move between the options of a radio group (view switch, segmented controls)
-  const group = event.target.closest?.("[role=radiogroup]");
-  if (group && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
-    event.preventDefault();
-    const radios = [...group.querySelectorAll("[role=radio]")].filter((r) => r.offsetParent !== null);
-    const i = radios.indexOf(event.target);
-    const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
-    const next = radios[(i + step + radios.length) % radios.length];
-    const label = next.textContent;
-    const groupLabel = group.getAttribute("aria-label");
-    next.click();
-    // The click may re-render the group; focus the option with the same label
-    const visibleGroup = [...document.querySelectorAll(`[role=radiogroup][aria-label="${groupLabel}"]`)]
-      .find((g) => g.offsetParent !== null);
-    const again = [...(visibleGroup?.querySelectorAll("[role=radio]") ?? [])].find((r) => r.textContent === label);
-    (again ?? next).focus();
-    return;
-  }
+  if (moveInRadioGroup(event)) return;
 
   if (event.key === "ArrowLeft" && !event.target.closest?.("[role=radiogroup]")) {
     event.preventDefault();
@@ -640,7 +684,7 @@ function onReaderClick(event) {
   }
   if (event.target.closest("button, a")) return;
   const verse = event.target.closest(".verse");
-  if (!verse || verse.classList.contains("is-title")) return;
+  if (!verse || verse.classList.contains("is-title") || !verse.dataset.verse) return;
   // Let people select text without toggling the verse
   if (window.getSelection()?.toString()) return;
   const n = Number(verse.dataset.verse);
@@ -695,7 +739,9 @@ function wireStaticControls() {
   reader.addEventListener("click", onReaderClick);
   document.addEventListener("keydown", onKeydown);
   window.addEventListener("popstate", () => {
-    if (isPickerOpen()) closePicker();
+    // Back closes what's on top: a dialog, or else the panel
+    const dialog = openDialog();
+    if (dialog) dialog.close();
     else if (state.panel) closePanel({ fromHistory: true });
   });
   desktop.addEventListener("change", syncNavState);
@@ -748,6 +794,7 @@ async function start() {
   const preview = previewParams();
   if (preview) applyPreviewSettings(preview);
   prefs.apply(settings);
+  if (prefs.loadError) toast("Couldn’t read your settings, so they’re left as they were: changes now won’t be saved", 8000);
   buildViewSwitches();
   syncNavState();
   initPicker(state.books, (book, chapter) => goTo(book, chapter, 0, { top: true }));

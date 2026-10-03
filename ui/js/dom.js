@@ -76,6 +76,34 @@ export function replace(el, ...children) {
   append(el, children);
 }
 
+const FOCUSABLE = "button, input, select, textarea, a[href], summary, [tabindex]";
+
+/**
+ * Run `draw`, which rebuilds `container`, keeping keyboard focus on the control that
+ * had it, found again by its kind and name, nearest where it was. A chip or switch
+ * pressed from the keyboard stays focused.
+ */
+export function keepFocus(container, draw) {
+  const active = document.activeElement;
+  if (!active || active === container || !container.contains(active)) return draw();
+  const kind = (el) => `${el.tagName}|${el.getAttribute("role") ?? ""}|${el.className}`;
+  const name = (el) => el.getAttribute("aria-label") ?? el.getAttribute("aria-labelledby") ?? el.textContent.trim();
+  const same = (el) => kind(el) === kind(active) && name(el) === name(active);
+  const before = [...container.querySelectorAll(FOCUSABLE)];
+  const at = before.indexOf(active);
+  // Which of the controls like it this was (the second "Options" button)
+  const rank = before.filter(same).indexOf(active);
+  const was = { kind: kind(active), name: name(active) };
+  const result = draw();
+  // Drawing may have put focus somewhere itself
+  if (container.contains(document.activeElement) && document.activeElement !== container) return result;
+  const now = [...container.querySelectorAll(FOCUSABLE)];
+  const like = now.filter((el) => kind(el) === was.kind && name(el) === was.name);
+  const target = like[rank] ?? like[0] ?? (now[at] && kind(now[at]) === was.kind ? now[at] : null);
+  target?.focus({ preventScroll: true });
+  return result;
+}
+
 /** "3 minutes ago", "yesterday", "12 Mar" */
 export function timeAgo(ms) {
   const seconds = Math.max(0, (Date.now() - ms) / 1000);

@@ -8,13 +8,18 @@
 //! NOTICE lists every work the app carries (from the catalogues in data/library/, with
 //! each one's licence and credit) after the sections in licenses/NOTICE-fixed.txt.
 //!
-//! Packages come from `cargo metadata` for app/Cargo.toml; their texts from the files
-//! they publish (LICENSE*, LICENCE*, COPYING*, COPYRIGHT*, NOTICE*, UNLICENSE*, and a
-//! LICENSES/ folder). A package that publishes none is given the standard text of its
-//! licence (the first of MIT, Apache-2.0, and the rest that it offers) from
-//! crates/import/licenses/, under a copyright line naming its authors.
+//! Packages are those `cargo tree` gives for app/Cargo.toml: the app's dependencies,
+//! theirs, and so on, with the features the app turns on, for every platform, build
+//! dependencies included but not dev-dependencies, nor what only the other workspace
+//! crates (the importer, the dev server) use. `cargo metadata` gives where each one
+//! is, its licence, and its authors. Their texts come
+//! from the files they publish (LICENSE*, LICENCE*, COPYING*, COPYRIGHT*, NOTICE*,
+//! UNLICENSE*, and a LICENSES/ folder). A package that publishes none is given the
+//! standard text of its licence (of each licence it must be used under, the first of
+//! MIT, Apache-2.0, and the rest that it offers) from crates/import/licenses/, under a
+//! copyright line naming its authors.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -106,20 +111,52 @@ fn texts_in(dir: &Path) -> Result<Vec<String>, String> {
         .collect()
 }
 
-/// The standard text for a package that publishes none: the first licence it offers
-/// that we have a text for, MIT and Apache-2.0 first.
-fn standard_text(p: &Package) -> Result<String, String> {
+/// The standard texts for a package that publishes none: for each licence it must be
+/// used under ("(MIT OR Apache-2.0) AND Unicode-3.0" is two), the first of those it
+/// offers that we have a text for, MIT and Apache-2.0 first.
+fn standard_texts(p: &Package) -> Result<Vec<String>, String> {
     let expr = p.license.clone().unwrap_or_default();
-    let offered: Vec<&str> = expr.split(|c: char| c == '/' || c == '(' || c == ')' || c.is_whitespace()).filter(|t| !t.is_empty() && *t != "OR" && *t != "AND" && *t != "WITH").collect();
     let order = ["MIT", "Apache-2.0", "BSD-3-Clause", "Zlib", "BSL-1.0", "MPL-2.0"];
-    let chosen = order.iter().find(|o| offered.contains(o)).ok_or_else(|| format!("{} {}: no licence file, and no standard text for {:?}", p.name, p.version, expr))?;
-    let text = STANDARD.iter().find(|(n, _)| n == chosen).map(|(_, t)| *t).unwrap();
-    if NEEDS_COPYRIGHT.contains(chosen) {
-        let who = if p.authors.is_empty() { format!("the {} authors", p.name) } else { p.authors.join(", ") };
-        Ok(format!("{} (as offered by {} {}; it publishes no licence file)\n\nCopyright (c) {}\n\n{}", chosen, p.name, p.version, who, text))
-    } else {
-        Ok(format!("{} (as offered by {} {}; it publishes no licence file)\n\n{}", chosen, p.name, p.version, text))
+    let mut out = Vec::new();
+    for all in expr.split(" AND ") {
+        let offered: Vec<&str> = all.split(|c: char| c == '/' || c == '(' || c == ')' || c.is_whitespace()).filter(|t| !t.is_empty() && *t != "OR" && *t != "WITH").collect();
+        let chosen = order.iter().find(|o| offered.contains(o)).ok_or_else(|| format!("{} {}: no licence file, and no standard text for {:?} in {:?}", p.name, p.version, all, expr))?;
+        let text = STANDARD.iter().find(|(n, _)| n == chosen).map(|(_, t)| t.replace("\r\n", "\n")).unwrap();
+        out.push(if NEEDS_COPYRIGHT.contains(chosen) {
+            let who = if p.authors.is_empty() { format!("the {} authors", p.name) } else { p.authors.join(", ") };
+            format!("{} (as offered by {} {}; it publishes no licence file)\n\nCopyright (c) {}\n\n{}", chosen, p.name, p.version, who, text)
+        } else {
+            format!("{} (as offered by {} {}; it publishes no licence file)\n\n{}", chosen, p.name, p.version, text)
+        });
     }
+    Ok(out)
+}
+
+/// The packages the app is built from, as (name, version): what it depends on, and
+/// what those depend on, and so on, with the features the app's build turns on (not
+/// the whole workspace's, as `cargo metadata` resolves them), for every platform, with
+/// build dependencies but not dev-dependencies.
+fn shipped(root: &Path) -> Result<HashSet<(String, String)>, String> {
+    let out = Command::new("cargo")
+        .args(["tree", "--locked", "--edges", "normal,build", "--target", "all", "--prefix", "none", "--format", "{p}", "--manifest-path"])
+        .arg(root.join("app/Cargo.toml"))
+        .output()
+        .map_err(|e| format!("cargo tree: {}", e))?;
+    if !out.status.success() {
+        return Err(format!("cargo tree: {}", String::from_utf8_lossy(&out.stderr)));
+    }
+    let mut set = HashSet::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        // "serde v1.0.228", "kjv-core v0.1.0 (C:\...)", "syn v2.0.106 (*)"
+        let mut words = line.split_whitespace();
+        if let (Some(name), Some(version)) = (words.next(), words.next().and_then(|v| v.strip_prefix('v'))) {
+            set.insert((name.to_string(), version.to_string()));
+        }
+    }
+    if set.is_empty() {
+        return Err("cargo tree: no packages".into());
+    }
+    Ok(set)
 }
 
 fn collect(root: &Path) -> Result<Software, String> {
@@ -132,7 +169,9 @@ fn collect(root: &Path) -> Result<Software, String> {
         return Err(format!("cargo metadata: {}", String::from_utf8_lossy(&out.stderr)));
     }
     let meta: Metadata = serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: {}", e))?;
-    let mut packages: Vec<&Package> = meta.packages.iter().filter(|p| !meta.workspace_members.contains(&p.id)).collect();
+    let shipped = shipped(root)?;
+    let mut packages: Vec<&Package> =
+        meta.packages.iter().filter(|p| shipped.contains(&(p.name.clone(), p.version.clone())) && !meta.workspace_members.contains(&p.id)).collect();
     packages.sort_by(|a, b| (a.name.as_str(), &a.version).cmp(&(b.name.as_str(), &b.version)));
     packages.dedup_by(|a, b| a.name == b.name && a.version == b.version);
     let mut texts: Vec<String> = Vec::new();
@@ -142,7 +181,7 @@ fn collect(root: &Path) -> Result<Software, String> {
         let dir = p.manifest_path.parent().ok_or("bad manifest path")?;
         let mut found = texts_in(dir)?;
         if found.is_empty() {
-            found.push(standard_text(p)?);
+            found = standard_texts(p)?;
         }
         let numbers = found
             .into_iter()
@@ -314,7 +353,7 @@ fn notice(root: &Path) -> Result<String, String> {
     works(&mut out, "Commentaries", &commentaries.commentary)?;
     works(&mut out, "Cross-references", &crossrefs.crossrefs)?;
     out.push('\n');
-    out.push_str(include_str!("../licenses/NOTICE-fixed.txt"));
+    out.push_str(&include_str!("../licenses/NOTICE-fixed.txt").replace("\r\n", "\n"));
     Ok(out)
 }
 

@@ -218,11 +218,16 @@ export function sanitize(raw) {
   };
 }
 
+/** Why the settings couldn't be read, if they couldn't: then they aren't written over
+ * (with the defaults the app falls back on) until it starts again. */
+export let loadError = null;
+
 export async function load() {
   try {
     return sanitize(await loadSettings());
   } catch (error) {
     console.error("Could not load settings", error);
+    loadError = String(error.message ?? error);
     return sanitize(null);
   }
 }
@@ -231,6 +236,7 @@ let saveTimer = null;
 
 /** Save soon; repeated changes within half a second are written once. */
 export function save(settings) {
+  if (loadError) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveSettings(settings).catch((error) => console.error("Could not save settings", error));
@@ -239,6 +245,7 @@ export function save(settings) {
 
 /** Write immediately (e.g. when the window is closing). */
 export function flush(settings) {
+  if (loadError) return Promise.resolve();
   clearTimeout(saveTimer);
   return saveSettings(settings);
 }
@@ -252,8 +259,9 @@ export function apply(settings) {
   root.style.setProperty("--text-scale", settings.textScale);
   root.style.setProperty("--orig-scale", settings.origScale);
 
+  // The view (data-view) is the reader's to set: what it shows depends on the chapter
+  // too (a translation without the KJV's Hebrew and Greek shows plain text)
   const app = document.getElementById("app");
-  app.dataset.view = settings.view;
   app.dataset.verseNumbers = settings.verseNumbers;
   app.dataset.redLetter = settings.redLetter;
   app.dataset.translit = settings.translit;

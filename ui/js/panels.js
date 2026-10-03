@@ -74,7 +74,7 @@ export function renderStrongs(body, ctx) {
     id: "strongs-input",
     value: st.query,
     placeholder: "H430 or G2316",
-    "aria-label": "Strong's number",
+    "aria-label": "Strong’s number",
     autocomplete: "off",
     autocapitalize: "characters",
     spellcheck: "false",
@@ -102,7 +102,7 @@ export function renderStrongs(body, ctx) {
 
   const draw = () => {
     const r = st.results;
-    if (!r) return replace(output, h("p", { class: "empty" }, "Tap a word in Interlinear view, or enter a Strong's number."));
+    if (!r) return replace(output, h("p", { class: "empty" }, "Tap a word in Interlinear view, or enter a Strong’s number."));
     if (!r.key) return replace(output, h("p", { class: "empty" }, "Enter a number like H430 (Hebrew) or G2316 (Greek)."));
     const lex = r.lexicon;
     replace(
@@ -303,7 +303,7 @@ export function renderSettings(body, ctx) {
     h("h3", { class: "section-title" }, "Hebrew & Greek"),
     stepperRow("Hebrew & Greek size", ORIG_SCALES, s.origScale, percent, (v) => set((x) => { x.origScale = v; })),
     switchRow("Transliteration", null, s.translit, (v) => set((x) => { x.translit = v; })),
-    switchRow("Strong's numbers", null, s.strongs, (v) => set((x) => { x.strongs = v; })),
+    switchRow("Strong’s numbers", null, s.strongs, (v) => set((x) => { x.strongs = v; })),
     switchRow("Grammar codes", "Morphology under each word", s.morph, (v) => set((x) => { x.morph = v; })),
     h("h3", { class: "section-title", "data-section": "ai" }, "AI assistant"),
     renderAiSettings(ctx),

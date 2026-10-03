@@ -37,7 +37,7 @@ function noOriginal() {
 
 function wordCard(word, lang) {
   const rtl = RTL.has(lang);
-  const label = [word.text, word.translit, word.gloss, word.strongs && `Strong's ${word.strongs}`]
+  const label = [word.text, word.translit, word.gloss, word.strongs && `Strong’s ${word.strongs}`]
     .filter(Boolean)
     .join(", ");
   return h(
@@ -192,9 +192,10 @@ function noteButton(part, onToggle) {
   );
 }
 
-/** Show or hide a note's text under its verse. */
+/** Show or hide a note's text under its verse (side by side, under its translation's
+ * text). */
 function toggleNote(button, part, text) {
-  const verse = button.closest(".verse");
+  const verse = button.closest(".pr-cell, .verse");
   const open = button.getAttribute("aria-expanded") === "true";
   for (const b of verse.querySelectorAll(".note-ref[aria-expanded='true']")) b.setAttribute("aria-expanded", "false");
   verse.querySelector(".verse-note")?.remove();
@@ -252,14 +253,26 @@ function libraryVerse(verse, selected) {
   ];
 }
 
+/** Greek letters folded as the search folds them (crates/library/src/text.rs): vowels
+ * with an oxia as with a tonos, and final sigma as sigma. */
+const GREEK = new Map([
+  ["\u1F71", "\u03AC"], ["\u1FBB", "\u03AC"], ["\u1F73", "\u03AD"], ["\u1FC9", "\u03AD"],
+  ["\u1F75", "\u03AE"], ["\u1FCB", "\u03AE"], ["\u1F77", "\u03AF"], ["\u1FDB", "\u03AF"],
+  ["\u1F79", "\u03CC"], ["\u1FF9", "\u03CC"], ["\u1F7B", "\u03CD"], ["\u1FEB", "\u03CD"],
+  ["\u1F7D", "\u03CE"], ["\u1FFB", "\u03CE"], ["\u1FD3", "\u0390"], ["\u1FE3", "\u03B0"],
+  ["\u03C2", "\u03C3"],
+]);
+
 /** One character folded as the search folds it (crates/library/src/text.rs): curly
- * quotes straight, dashes plain, "æ" as "ae", spaces as spaces, lower case. */
+ * quotes straight, dashes plain, "æ" as "ae", Greek oxia as tonos and final sigma as
+ * sigma, spaces as spaces, lower case. */
 function foldChar(c) {
   if (c === "\u2018" || c === "\u2019" || c === "\u201B" || c === "\u02BC") return "'";
   if (c === "\u201C" || c === "\u201D") return '"';
   const code = c.codePointAt(0);
   if (code >= 0x2010 && code <= 0x2014) return "-";
   if (c === "æ" || c === "Æ") return "ae";
+  if (GREEK.has(c)) return GREEK.get(c);
   if (/\s/u.test(c)) return " ";
   return c.toLowerCase();
 }
@@ -288,14 +301,18 @@ function markMatches(container, query) {
       nodes.push({ node: n, start: text.length });
       text += n.nodeValue;
     }
-    // The folded text, and for each of its code units where it came from in `text`
+    // The folded text, and for each of its code units where it came from in `text`.
+    // A run of spaces is one space, as the search reads a verse (the spaces either
+    // side of a footnote's marker, "hill  cannot", are one)
     let folded = "";
     const from = [];
     for (let i = 0; i < text.length; ) {
       const ch = String.fromCodePoint(text.codePointAt(i));
       const f = foldChar(ch);
-      for (let k = 0; k < f.length; k++) from.push(i);
-      folded += f;
+      if (!(f === " " && folded.endsWith(" "))) {
+        for (let k = 0; k < f.length; k++) from.push(i);
+        folded += f;
+      }
       i += ch.length;
     }
     from.push(text.length);
@@ -351,8 +368,9 @@ export function renderLibraryChapter(container, chapter, { selectedVerse, nav, h
 /** One column's verses for one row: its text as the reader draws it, numbered as that
  * translation numbers it (with the chapter where it differs from the row's). */
 function parallelCell(column, cell) {
-  // Named on phones, where the columns stack (drawn from data-name, so it isn't text)
-  const attrs = (cls) => ({ class: cls, "data-name": column.abbr });
+  // Named on phones, where the columns stack (drawn from data-name, so it isn't text),
+  // and always for screen readers
+  const attrs = (cls) => ({ class: cls, "data-name": column.abbr, role: "group", "aria-label": column.name || column.abbr });
   if (cell.above) return h("div", attrs("pr-cell is-above"), h("p", { class: "pr-note" }, "With the verse above"));
   if (!cell.verses.length) return h("div", attrs("pr-cell is-empty"), h("p", { class: "pr-note" }, "Not in this translation"));
   return h(
@@ -385,9 +403,11 @@ export function renderParallel(container, chapter, { selectedVerse, nav, highlig
         "div",
         {
           class: isTitle ? "verse pr-row is-title" : "verse pr-row",
-          id: `v${first}`,
-          "data-verse": first,
-          "data-label": row.number,
+          // A verse only another column has (the KJV's Matthew 17:21 beside the BSB)
+          // isn't one to select
+          id: row.number ? `v${first}` : null,
+          "data-verse": row.number ? first : null,
+          "data-label": row.number || null,
           "aria-current": !isTitle && first === selectedVerse ? "true" : null,
         },
         row.cells.map((cell, i) => parallelCell(chapter.columns[i], cell)),
@@ -414,6 +434,7 @@ export function renderParallel(container, chapter, { selectedVerse, nav, highlig
     ),
   );
   article.style.setProperty("--columns", String(chapter.columns.length));
+  article.dataset.columns = String(chapter.columns.length);
   if (highlight) markMatches(article, highlight);
   container.replaceChildren(article);
 }

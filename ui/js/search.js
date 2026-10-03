@@ -44,7 +44,7 @@ function hitSegments(nodes) {
 
 function open(ctx, group, hit, query) {
   if (group.kind === "commentary") {
-    openNote(ctx, { id: group.id, label: hit.reference, book: hit.book, chapter: hit.chapter, verse: hit.verse });
+    openNote(ctx, { id: group.id, label: hit.reference, nth: hit.nth, book: hit.book, chapter: hit.chapter, verse: hit.verse });
   } else {
     ctx.openIn(group.id, hit.book, hit.chapter, hit.verse, { highlight: query, fromPanel: true });
   }
@@ -89,35 +89,43 @@ export function renderSearch(body, ctx) {
     spellcheck: "false",
     enterkeyhint: "search",
   });
-  const results = h("div", { class: "search-results", "aria-live": "polite" });
+  const results = h("div", { class: "search-results" });
+  // What screen readers hear as results come in: a line, not the list again each time
+  const status = h("p", { class: "visually-hidden", role: "status" });
   const choices = h("div", { class: "search-choices" });
 
   const run = async () => {
     const query = input.value.trim();
     s.query = input.value;
     const mine = ++seq;
-    if (!query) {
+    // Drawn with `redraw`, into the panel on screen: choosing where to search redraws
+    // the panel before this runs
+    const clear = () => {
       s.results = null;
-      replace(results);
+      redraw();
       ctx.setHighlight(null);
-      return;
-    }
+    };
+    if (!query) return clear();
     if (ctx.settings.search.in !== "reading" && !known) {
       try {
         known = await loadCatalogues();
       } catch {
         // searched as the translation being read
       }
+      if (mine !== seq) return;
     }
     const list = sources(ctx);
+    // Nothing chosen to search ("Choose what to search." says so)
+    if (!list.length) return clear();
     const many = list.length > 1;
     const book = s.scope === "book" ? ctx.state.chapter?.book : null;
-    s.results = { query, many, groups: list.map((g) => ({ ...g, status: "pending" })) };
-    drawResults();
+    const r = { query, many, groups: list.map((g) => ({ ...g, status: "pending" })) };
+    s.results = r;
+    redraw();
     let next = 0;
     const worker = async () => {
-      while (next < s.results.groups.length && mine === seq) {
-        const g = s.results.groups[next++];
+      while (next < r.groups.length && mine === seq) {
+        const g = r.groups[next++];
         try {
           g.data = await call("search_source", { query, kind: g.kind, source: g.id, scope: s.scope, book, limit: many ? SOME : ALL });
           g.status = "done";
@@ -147,7 +155,32 @@ export function renderSearch(body, ctx) {
     if (s.results === r) redraw();
   };
 
+  /** The line screen readers announce: searching, then how many were found. */
+  const summary = () => {
+    const r = s.results;
+    if (!r) return "";
+    if (r.groups.some((g) => g.status === "pending")) return "Searching…";
+    const found = r.groups.filter((g) => g.status === "done" && g.data.total > 0);
+    const total = found.reduce((n, g) => n + g.data.total, 0);
+    if (!r.many) {
+      const g = r.groups[0];
+      if (g.status === "error") return "Search failed.";
+      if (!found.length) return `No verses in the ${g.short} contain “${r.query}”.`;
+      // As the summary above the results reads
+      return g.data.total > g.data.hits.length
+        ? `${plural(g.data.total, "verse")} · showing the first ${g.data.hits.length.toLocaleString()}`
+        : plural(g.data.total, "verse");
+    }
+    return found.length ? `${plural(total, "result")} in ${plural(found.length, "source")}` : `Nothing contains “${r.query}”.`;
+  };
+
   const drawResults = () => {
+    drawList();
+    const line = summary();
+    if (status.textContent !== line) status.textContent = line;
+  };
+
+  const drawList = () => {
     const r = s.results;
     if (!r) return replace(results);
     if (!r.many) {
@@ -315,7 +348,7 @@ export function renderSearch(body, ctx) {
   }
   drawChoices();
   redraw = drawResults;
-  replace(body, h("div", { class: "field" }, input), h("div", { class: "field" }, choices), h("div", { class: "field" }, scope), results);
+  replace(body, h("div", { class: "field" }, input), h("div", { class: "field" }, choices), h("div", { class: "field" }, scope), status, results);
   drawResults();
   return input;
 }

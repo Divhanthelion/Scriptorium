@@ -323,6 +323,15 @@ fn scan_entity(s: &str) -> Option<(char, usize)> {
     Some((c, end + 1))
 }
 
+/// A character escaped twice at the start of `s`, "&amp;#226;" for "â" (as Matthew
+/// Henry's module has "quâ non"): the character, not the escape.
+fn twice_escaped(s: &str) -> Option<(char, usize)> {
+    let rest = s.strip_prefix("&amp;#")?;
+    let probe = format!("&#{}", &rest[..rest.char_indices().nth(10).map_or(rest.len(), |(i, _)| i)]);
+    let (c, n) = scan_entity(&probe)?;
+    Some((c, "&amp;".len() + n - 1))
+}
+
 fn decode_entities_strict(s: &str) -> Option<String> {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
@@ -375,7 +384,7 @@ pub fn tokenize(raw: &str, dialect: Dialect, stats: &mut Stats) -> Result<Vec<To
                 }
                 None => return Err(format!("not a well-formed tag at: {}", context(raw, i))),
             },
-            b'&' => match scan_entity(&raw[i..]) {
+            b'&' => match twice_escaped(&raw[i..]).or_else(|| scan_entity(&raw[i..])) {
                 Some((c, n)) => {
                     text.push(c);
                     i += n;
@@ -1943,7 +1952,7 @@ fn source_stream(raw: &str, dialect: Dialect) -> Result<Vec<Sym>, String> {
                 None if dialect == Dialect::Thml => out.push(Sym::Ch('<')),
                 None => return Err(format!("not a tag at: {}", context(raw, i))),
             },
-            '&' => match scan_entity(rest) {
+            '&' => match twice_escaped(rest).or_else(|| scan_entity(rest)) {
                 Some((d, n)) => {
                     out.push(sym(d));
                     i += n;

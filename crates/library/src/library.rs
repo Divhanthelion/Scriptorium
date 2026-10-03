@@ -133,9 +133,9 @@ impl Library {
     }
 
     /// Commentary `id`'s notes on book `code`, folded for searching: one document per
-    /// note, in the order of [`Library::commentary_book`], as [`notes::text`] gives it.
+    /// note, in the order of [`Library::commentary_book`], as [`notes::search_text`] gives it.
     pub fn commentary_corpus(&self, id: &str, code: &str) -> Result<Arc<Corpus>, String> {
-        self.corpora.get_or(&format!("comm/{id}/{code}"), || Ok(Corpus::new(self.commentary_book(id, code)?.iter().map(|n| notes::text(&n.body)))))
+        self.corpora.get_or(&format!("comm/{id}/{code}"), || Ok(Corpus::new(self.commentary_book(id, code)?.iter().map(|n| notes::search_text(&n.body)))))
     }
 
     /// Other text to search (the app's own KJV), kept with the library's.
@@ -237,12 +237,22 @@ impl Library {
         set.contains(&(r.1, r.2.clone()))
     }
 
+    /// Whether the KJV has book `code` (it has the Apocrypha, but not 3 Maccabees or
+    /// Psalm 151).
+    pub fn kjv_has_book(&self, code: &str) -> bool {
+        self.bible("kjv").is_some_and(|b| b.books.iter().any(|x| x.code == code))
+    }
+
     /// The verses of translation `to` that correspond to verse `r` of translation
     /// `from`, through the KJV. Empty when `to` has no counterpart.
     pub fn map(&self, from: &str, to: &str, r: &Ref) -> Result<Vec<Ref>, String> {
         let kjv: Vec<Ref> = self.alignment(from)?.to_kjv(r, &|k| self.has_verse("kjv", k));
         if to == "kjv" {
             return Ok(kjv);
+        }
+        // A book the KJV doesn't have, between two translations that do: verse for verse
+        if kjv.is_empty() && !self.kjv_has_book(&r.0) {
+            return Ok(if self.has_verse(to, r) { vec![r.clone()] } else { Vec::new() });
         }
         let target = self.alignment(to)?;
         let mut out: Vec<Ref> = kjv.iter().flat_map(|k| target.from_kjv(k, &|x| self.has_verse(to, x))).collect();
@@ -610,7 +620,7 @@ pub mod build {
                 }
                 None => {
                     let notes = crate::notes::parse(text).map_err(|e| format!("{name}: {e}"))?;
-                    Ok(crate::search::chunk_words(notes.iter().map(|n| crate::notes::text(&n.body))))
+                    Ok(crate::search::chunk_words(notes.iter().map(|n| crate::notes::search_text(&n.body))))
                 }
             }
         })

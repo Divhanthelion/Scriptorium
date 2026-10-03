@@ -73,7 +73,14 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 fn settings_load(app: AppHandle) -> Result<Value, String> {
     let path = settings_path(&app)?;
     match fs::read_to_string(&path) {
-        Ok(text) => Ok(serde_json::from_str(text.trim_start_matches('\u{FEFF}')).unwrap_or(Value::Null)),
+        Ok(text) => match serde_json::from_str(text.trim_start_matches('\u{FEFF}')) {
+            Ok(v) => Ok(v),
+            // Not settings the app can read: kept beside them, not written over
+            Err(_) => {
+                let _ = fs::rename(&path, path.with_extension("json.unreadable"));
+                Ok(Value::Null)
+            }
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
         Err(e) => Err(format!("read {}: {}", path.display(), e)),
     }

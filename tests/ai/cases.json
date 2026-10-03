@@ -1,0 +1,330 @@
+[
+ {
+  "name": "01-verse-greek",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "JHN.11.33-JHN.11.35"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "original": true,
+   "definitions": true
+  },
+  "questions": [
+   "Why did Jesus weep in verse 35, when he already knew he would raise Lazarus? What is the Greek word, and how does it differ from the weeping of Mary and the Jews in verse 33?"
+  ]
+ },
+ {
+  "name": "02-translations-psalm23",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "PSA.23"
+    }
+   ],
+   "translations": [
+    "kjv",
+    "web",
+    "dra",
+    "brenton"
+   ]
+  },
+  "questions": [
+   "Compare how these four translations render verse 1 and verse 4. Why does the Douay-Rheims call this Psalm 22?"
+  ]
+ },
+ {
+  "name": "03-numbering-malachi",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "MAL.4"
+    }
+   ],
+   "translations": [
+    "kjv",
+    "jps"
+   ]
+  },
+  "questions": [
+   "Where is this chapter in the Jewish Publication Society's translation, and why is it numbered differently?"
+  ]
+ },
+ {
+  "name": "04-commentaries-romans3",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "ROM.3.21-ROM.3.26"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "commentaries": [
+    "mhc",
+    "jfb",
+    "gill",
+    "tyndale"
+   ]
+  },
+  "questions": [
+   "How do these commentators explain the word \"propitiation\" in verse 25? Where do they agree and where do they differ?"
+  ]
+ },
+ {
+  "name": "05-fathers-beatitudes",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "MAT.5.3-MAT.5.12"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "commentaries": [
+    "chrysostom",
+    "augustine"
+   ]
+  },
+  "questions": [
+   "What do Chrysostom and Augustine say \"poor in spirit\" means? Quote each of them."
+  ]
+ },
+ {
+  "name": "06-crossrefs-isaiah53",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "ISA.53.4-ISA.53.6"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "crossrefs": [
+    "openbible",
+    "tsk"
+   ],
+   "crossrefLimit": 10,
+   "crossrefText": true
+  },
+  "questions": [
+   "Where does the New Testament take up these verses? Show me the strongest connections."
+  ]
+ },
+ {
+  "name": "07-users-example",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "LUK.2.14"
+    },
+    {
+     "bible": "kjv",
+     "refs": "ROM.5.1-ROM.5.2"
+    },
+    {
+     "bible": "kjv",
+     "refs": "MIC.6"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "commentaries": [
+    "mhc",
+    "jfb",
+    "tyndale"
+   ]
+  },
+  "questions": [
+   "What do these three passages say about peace with God, and how do the commentators connect them?"
+  ]
+ },
+ {
+  "name": "08-hebrew-bara",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "GEN.1.1-GEN.1.3"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "original": true,
+   "definitions": true
+  },
+  "questions": [
+   "What does the Hebrew word translated \"created\" mean, and what can and can't we conclude from it?"
+  ]
+ },
+ {
+  "name": "09-no-context-misquote",
+  "context": {
+   "passages": []
+  },
+  "questions": [
+   "Where does the Bible say \"God helps those who help themselves\"?"
+  ],
+  "unattached": true
+ },
+ {
+  "name": "10-not-attached",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "JHN.3.16"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ]
+  },
+  "questions": [
+   "How does the World English Bible word this verse, and how does Romans 5:8 relate to it?"
+  ],
+  "unattached": true
+ },
+ {
+  "name": "11-apocrypha-tobit",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "TOB.1"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ]
+  },
+  "questions": [
+   "Who is Tobit, and what kind of man does this chapter show him to be?"
+  ]
+ },
+ {
+  "name": "12-mhc-melchizedek",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "GEN.14.18-GEN.14.20"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "commentaries": [
+    "mhc",
+    "gill"
+   ]
+  },
+  "questions": [
+   "Does Matthew Henry think Melchizedek was Shem? What does Gill say?"
+  ]
+ },
+ {
+  "name": "13-conversation",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "ROM.8"
+    }
+   ],
+   "translations": [
+    "kjv",
+    "web"
+   ],
+   "commentaries": [
+    "mhc"
+   ]
+  },
+  "questions": [
+   "Summarize the argument of this chapter in five sentences.",
+   "What does \"the firstfruits of the Spirit\" in verse 23 mean, according to Matthew Henry?",
+   "Now compare how the KJV and WEB word verse 28."
+  ]
+ },
+ {
+  "name": "14-whole-book-large",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "ROM"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "commentaries": [
+    "mhc",
+    "gill"
+   ]
+  },
+  "questions": [
+   "Where in Romans does Paul quote Habakkuk, and what do Henry and Gill make of it?",
+   "And where does he quote Genesis 15:6?"
+  ]
+ },
+ {
+  "name": "15-parallel-numbering-question",
+  "context": {
+   "passages": [
+    {
+     "bible": "dra",
+     "refs": "PSA.50"
+    }
+   ],
+   "translations": [
+    "dra",
+    "kjv"
+   ],
+   "commentaries": [
+    "augustine"
+   ]
+  },
+  "questions": [
+   "What is Augustine's main point about this psalm's title?"
+  ]
+ },
+ {
+  "name": "16-interpretive-fairness",
+  "context": {
+   "passages": [
+    {
+     "bible": "kjv",
+     "refs": "MAT.16.13-MAT.16.20"
+    }
+   ],
+   "translations": [
+    "kjv"
+   ],
+   "commentaries": [
+    "mhc",
+    "chrysostom",
+    "tyndale"
+   ],
+   "original": true
+  },
+  "questions": [
+   "Is Peter the rock in verse 18?"
+  ]
+ }
+]

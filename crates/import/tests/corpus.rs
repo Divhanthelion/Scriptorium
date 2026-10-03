@@ -108,7 +108,8 @@ fn entity(s: &str) -> Option<(char, usize)> {
     Some((c, end + 1))
 }
 
-/// A source's text content: tags removed, entities decoded.
+/// A source's text content: tags removed, entities decoded (a character escaped twice,
+/// "&amp;#226;" in Matthew Henry, as the character).
 fn source_chars(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut i = 0;
@@ -122,8 +123,23 @@ fn source_chars(raw: &str) -> String {
         } else if c == '&'
             && let Some((d, n)) = entity(&raw[i..])
         {
-            out.push(d);
-            i += n;
+            let rest = &raw[i + n..];
+            let again = if d == '&' && rest.starts_with('#') {
+                let cut = rest.char_indices().nth(12).map_or(rest.len(), |(k, _)| k);
+                entity(&format!("&{}", &rest[..cut]))
+            } else {
+                None
+            };
+            match again {
+                Some((e, m)) => {
+                    out.push(e);
+                    i += n + m - 1;
+                }
+                None => {
+                    out.push(d);
+                    i += n;
+                }
+            }
             continue;
         }
         out.push(c);

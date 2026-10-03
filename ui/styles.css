@@ -489,10 +489,23 @@ mark.hit {
 .pr-cell > p + p { margin-top: 0.4em; }
 .pr-note { font-size: 0.8125rem; color: var(--muted); font-style: italic; }
 .pr-cell .verse-text.is-title { font-style: italic; color: var(--text-2); }
-@media (max-width: 640px) {
+/* Side by side while each column has room; stacked, each named, when the reader (with
+   the panel open beside it, or on a phone) is too narrow for them */
+.parallel-reading { container-type: inline-size; }
+@container (max-width: 600px) {
   .pr-columns { display: none; }
   .pr-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .pr-cell::before { content: attr(data-name); display: block; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 1px; }
+  .pr-cell::before { content: attr(data-name); content: attr(data-name) / ""; display: block; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 1px; }
+}
+@container (max-width: 760px) {
+  .parallel-reading[data-columns="3"] .pr-columns, .parallel-reading[data-columns="4"] .pr-columns { display: none; }
+  .parallel-reading[data-columns="3"] .pr-row, .parallel-reading[data-columns="4"] .pr-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .parallel-reading[data-columns="3"] .pr-cell::before, .parallel-reading[data-columns="4"] .pr-cell::before { content: attr(data-name); content: attr(data-name) / ""; display: block; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 1px; }
+}
+@container (max-width: 940px) {
+  .parallel-reading[data-columns="4"] .pr-columns { display: none; }
+  .parallel-reading[data-columns="4"] .pr-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .parallel-reading[data-columns="4"] .pr-cell::before { content: attr(data-name); content: attr(data-name) / ""; display: block; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 1px; }
 }
 
 /* Interlinear word cards */
@@ -906,8 +919,10 @@ details.note > summary { cursor: pointer; min-height: 32px; display: list-item; 
 .note-body .note-row { display: flex; gap: 1em; }
 .note-body .note-cell { flex: 1; }
 .note-body .note-fn { font-size: 0.875em; color: var(--muted); }
-.note-link { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 2px; }
-.note-link:hover { text-decoration-color: currentColor; }
+.note-link, .text-link { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 2px; }
+.note-link:hover, .text-link:hover { text-decoration-color: currentColor; }
+/* A link that is a whole address breaks anywhere rather than run off a phone's width */
+.licence-package .text-link { overflow-wrap: anywhere; text-align: start; }
 
 /* ------------------------------------------------------------------ AI assistant */
 

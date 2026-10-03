@@ -46,8 +46,10 @@ function shown(label, text) {
   return h("details", { class: "licence-text" }, h("summary", {}, label), h("pre", { tabindex: "0" }, text));
 }
 
-/** Works grouped by licence: each with its name and the credit it asks for. */
-function works(title, list) {
+/** Works grouped by licence: each with its name and the credit it asks for (or why
+ * they couldn't be listed). */
+function works(title, list, error = null) {
+  if (error) return h("section", { class: "licence-section" }, h("h3", { class: "section-title" }, title), h("p", { class: "chat-error small" }, `Couldn’t list them: ${error}`));
   const groups = LICENCES.map(([key, name, url, asks]) => {
     const mine = list.filter((w) => w.licence === key);
     if (!mine.length) return null;
@@ -73,7 +75,14 @@ async function softwareList(container) {
       if (!r.ok) throw new Error(`software.json: ${r.status}`);
       return r.json();
     });
-    const s = await software;
+    let s;
+    try {
+      s = await software;
+    } catch (error) {
+      // Asked for again next time
+      software = null;
+      throw error;
+    }
     const filter = h("input", { type: "search", placeholder: "Find a package", "aria-label": "Find a package", autocomplete: "off", spellcheck: "false" });
     const list = h("ul", { class: "licence-packages" });
     const draw = () => {
@@ -107,10 +116,11 @@ export async function openLicences(ctx) {
   replace(body, h("p", { class: "muted" }, "Loading…"));
   if (!d.open) d.showModal();
   let known = { commentaries: [], crossrefs: [] };
+  let missing = null;
   try {
     known = await loadCatalogues();
-  } catch {
-    // shown without them
+  } catch (error) {
+    missing = String(error.message ?? error);
   }
   const bibles = ctx.state.bibles.map((b) => ({ licence: b.licence, title: `${b.abbr} · ${b.name}, ${b.year}`, credit: b.credit }));
   const commentaries = known.commentaries.map((c) => ({ licence: c.licence, title: `${c.name} · ${c.author} (${c.year})`, credit: c.credit }));
@@ -127,8 +137,8 @@ export async function openLicences(ctx) {
       h("p", { class: "small muted" }, "Everything below comes with it under its own terms, which that licence doesn’t change."),
     ),
     works("Bible translations", bibles),
-    works("Commentaries", commentaries),
-    works("Cross-references", crossrefs),
+    works("Commentaries", commentaries, missing),
+    works("Cross-references", crossrefs, missing),
     h(
       "section",
       { class: "licence-section" },

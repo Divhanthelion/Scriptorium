@@ -27,16 +27,32 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest, usage_option: bool) 
     if let Some(max) = req.max_tokens {
         body["max_tokens"] = json!(max);
     }
-    if let Some(on) = req.enable_thinking {
-        body["chat_template_kwargs"] = json!({"enable_thinking": on});
-    }
-    if let Some(effort) = &req.effort {
-        // OpenAI reasoning models; other servers ignore unknown fields or say so
-        if req.endpoint.base_url.contains("api.openai.com") {
+    if is_deepseek(&req.endpoint.base_url) {
+        // DeepSeek V4 thinks by default; `thinking` turns it on or off, and
+        // `reasoning_effort` ("low", "high", "max") sets how hard
+        if let Some(on) = req.enable_thinking {
+            body["thinking"] = json!({"type": if on { "enabled" } else { "disabled" }});
+        }
+        if let Some(effort) = &req.effort {
             body["reasoning_effort"] = json!(effort);
+        }
+    } else {
+        if let Some(on) = req.enable_thinking {
+            body["chat_template_kwargs"] = json!({"enable_thinking": on});
+        }
+        if let Some(effort) = &req.effort {
+            // OpenAI reasoning models; other servers ignore unknown fields or say so
+            if req.endpoint.base_url.contains("api.openai.com") {
+                body["reasoning_effort"] = json!(effort);
+            }
         }
     }
     auth(client.post(url(&req.endpoint.base_url, "chat/completions")), &req.endpoint).json(&body)
+}
+
+/// DeepSeek's own API (not another service that hosts its models)
+fn is_deepseek(base_url: &str) -> bool {
+    base_url.contains("api.deepseek.com")
 }
 
 pub fn models_request(client: &reqwest::Client, endpoint: &Endpoint) -> reqwest::RequestBuilder {
@@ -139,6 +155,41 @@ impl crate::Decoder for Decoder {
 mod tests {
     use super::*;
     use crate::Decoder as _;
+
+    /// The JSON body `request` sends for `base_url` with thinking and effort set
+    fn body(base_url: &str, thinking: Option<bool>, effort: Option<&str>) -> Value {
+        let req = ChatRequest {
+            endpoint: Endpoint { kind: crate::Kind::OpenAi, base_url: base_url.into(), api_key: None },
+            model: "m".into(),
+            instructions: "i".into(),
+            context: String::new(),
+            messages: Vec::new(),
+            max_tokens: Some(100),
+            effort: effort.map(String::from),
+            thinking: false,
+            enable_thinking: thinking,
+        };
+        let built = request(&reqwest::Client::new(), &req, true).build().unwrap();
+        serde_json::from_slice(built.body().unwrap().as_bytes().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn deepseek_takes_its_own_thinking_switch_and_effort() {
+        let b = body("https://api.deepseek.com/v1", Some(false), Some("low"));
+        assert_eq!(b["thinking"], json!({"type": "disabled"}));
+        assert_eq!(b["reasoning_effort"], json!("low"));
+        assert!(b.get("chat_template_kwargs").is_none());
+        let on = body("https://api.deepseek.com/v1", Some(true), None);
+        assert_eq!(on["thinking"], json!({"type": "enabled"}));
+        assert!(on.get("reasoning_effort").is_none());
+        // Left alone, DeepSeek's defaults apply
+        let default = body("https://api.deepseek.com/v1", None, None);
+        assert!(default.get("thinking").is_none() && default.get("reasoning_effort").is_none());
+        // A local server keeps its chat-template switch, and gets no effort
+        let local = body("http://192.168.1.20:8000/v1", Some(false), Some("low"));
+        assert_eq!(local["chat_template_kwargs"], json!({"enable_thinking": false}));
+        assert!(local.get("thinking").is_none() && local.get("reasoning_effort").is_none());
+    }
 
     fn decode(lines: &[&str]) -> Vec<Event> {
         let mut d = Decoder::default();

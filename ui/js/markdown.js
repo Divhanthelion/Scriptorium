@@ -28,8 +28,9 @@ export function referenceFinder(books) {
   add("Song of Songs", "Song of Solomon");
   add("Revelations", "Revelation");
   const labels = [...alias.keys()].sort((a, b) => b.length - a.length).map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  // "John 3:16", "Romans 8:26-27", "Matthew 15:21–16:23" (linked whole, to where it starts)
   const pattern = new RegExp(
-    `(?<![\\p{L}\\d])(${labels.join("|")})\\.?\\s+(\\d{1,3}):(\\d{1,3})(?:\\s*[-–]\\s*(\\d{1,3})(?!:))?`,
+    `(?<![\\p{L}\\d])(${labels.join("|")})\\.?\\s+(\\d{1,3}):(\\d{1,3})(?![\\d:])(?:\\s*[-–]\\s*(?:\\d{1,3}:)?\\d{1,3}(?![\\d:]))?`,
     "giu",
   );
   return (text) => {
