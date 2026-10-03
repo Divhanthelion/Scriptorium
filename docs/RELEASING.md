@@ -62,7 +62,7 @@ These need your identity, payment, or tax details, so they can't be automated.
 11. Under **Grow → Store presence → Main store listing**:
     - name, short description, and full description (see "Listing text" below);
     - a 512×512 icon and a 1024×500 feature graphic;
-    - 2 to 8 phone screenshots (9:16; the Device screenshots workflow's Android ones are a start);
+    - 2 to 8 phone screenshots. No side may be more than twice the other, so a modern phone's own screenshots (about 9:20) are refused; the **screens-android** artifact of the Device screenshots workflow is 1080×1920;
     - category **Books & Reference**, and a contact email.
 
 **First release: the closed test**
@@ -178,6 +178,6 @@ Optional study assistant (generative AI): connect an AI service you choose, or y
 
 - Privacy policy URL: https://github.com/Divhanthelion/Scriptorium/blob/main/PRIVACY.md
 - App icon: 1024×1024 PNG, no transparency. Scriptorium still uses KJV Interlinear's icon (`icon.png`); it needs one of its own.
-- Screenshots: iPhone 6.9" (1320×2868), iPad 13" (2064×2752), Android phone (1080×1920 or larger), Play feature graphic (1024×500), Mac and Windows desktop
+- Screenshots: iPhone 6.9" (1320×2868), iPad 13" (2064×2752), Android phone (1080×1920; Play refuses anything taller than 1:2), Play feature graphic (1024×500), Mac and Windows desktop
 - Content rights: every work and its licence is in NOTICE and in the app under Settings → Licences: 31 translations and 9 commentaries in the public domain (the KJV outside the UK's Crown patent), the rest under Creative Commons (BY, BY-SA, BY-ND, BY-NC-ND; the NonCommercial ones require the app to stay free, with no ads or purchases); STEP Bible's Hebrew and Greek under CC BY 4.0. CCEL asks to be contacted before its texts are republished (a courtesy, not a licence term).
 - Apple guideline 4.3 (spam) often catches Bible apps. Lead the description with what is distinctive: a whole study library offline (44 translations, commentaries from the Church Fathers on, cross-references), up to four translations side by side in each one's own verse numbering, search across all of it, and an assistant that reads exactly the passages and sources you choose.

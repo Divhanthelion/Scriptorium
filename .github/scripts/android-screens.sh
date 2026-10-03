@@ -13,6 +13,9 @@ adb install -r "$apk"
 adb shell settings put global window_animation_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
+# 9:16, so the screenshots suit Google Play (no side more than twice the other; the
+# emulated phone itself is 9:20)
+adb shell wm size 1080x1920
 
 # Wait (up to a minute) until the page has drawn a chapter, then let it settle
 wait_loaded() {
