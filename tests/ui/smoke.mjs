@@ -267,6 +267,34 @@ await test("Parallel: translations side by side, verse by verse in each one's nu
   await until(() => $("#translation-label").textContent === "KJV" && $("#reader").getAttribute("aria-busy") === "false", "back to the KJV");
 `);
 
+await test("Study on a phone: commentary and cross-references from a tab, switched in the header", "book=John&chapter=3&tr=kjv&view=kjv", { width: 390, height: 844, mobile: true }, `
+  const tab = (name) => $('[data-tab="' + name + '"]');
+  assert(visible(tab("study")) && tab("study").textContent === "Study", "a Study tab");
+  assert(document.documentElement.scrollWidth <= document.documentElement.clientWidth, "six tabs fit");
+  tab("study").click();
+  await until(() => !$("#panel").hidden && $("#panel").dataset.panel === "notes", "commentary");
+  assert(tab("study").getAttribute("aria-current") === "page", "Study is the current tab");
+  const sw = $(".study-switch");
+  // (The title is still there for screen readers, in a box a pixel wide)
+  const shown = (el) => el.getBoundingClientRect().width > 1;
+  assert(visible(sw) && !shown($("#panel-title")), "the switch in place of the title");
+  assert($('[data-study="notes"]').getAttribute("aria-checked") === "true", "Commentary checked");
+  $('[data-study="xrefs"]').click();
+  await until(() => $("#panel").dataset.panel === "xrefs" && $('[data-study="xrefs"]').getAttribute("aria-checked") === "true", "cross-references");
+  assert($("#panel-title").textContent === "Cross-references", "the panel still named");
+  // Back to reading, then Study again: where it was left
+  tab("read").click();
+  await until(() => $("#panel").hidden, "reading");
+  tab("study").click();
+  await until(() => !$("#panel").hidden && $("#panel").dataset.panel === "xrefs", "cross-references again");
+  // Other panels have no switch
+  tab("search").click();
+  await until(() => $("#panel").dataset.panel === "search", "search");
+  assert(!visible(sw) && shown($("#panel-title")), "search keeps its title");
+  tab("read").click();
+  await until(() => $("#panel").hidden, "reading again");
+`);
+
 await test("Parallel on a phone: the columns stack, each named", "book=John&chapter=3&view=parallel&tr=kjv", { width: 390, height: 844, mobile: true }, `
   await until(() => $(".parallel-reading"), "parallel");
   const cell = $("#v16 .pr-cell");
@@ -512,7 +540,8 @@ await test("Chat: the assistant looks up what isn't attached, and shows what it 
   assert(lastAnswer().querySelector(".msg-usage").textContent.startsWith("6k in · 70 out"), "usage: " + lastAnswer().querySelector(".msg-usage").textContent);
   // Saved with what was looked up (not its text)
   await wait(300);
-  const saved = (await (await fetch("/api/conversations_list", { method: "POST", body: "{}" })).json())[0];
+  const list = await (await fetch("/api/conversations_list", { method: "POST", body: "{}" })).json();
+  const saved = list.find((x) => x.title.startsWith("Please look up how the WEB"));
   const c = await (await fetch("/api/conversation_load", { method: "POST", body: JSON.stringify({ id: saved.id }) })).json();
   const l = c.messages.at(-1).lookups[0];
   assert(l.label === "John 3:16 · WEB" && l.tool === "read" && !("text" in l), "saved: " + JSON.stringify(l));

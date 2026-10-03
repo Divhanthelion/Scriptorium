@@ -614,6 +614,16 @@ mark.hit {
   font-size: 1.125rem;
   font-weight: 650;
 }
+/* Phones: commentary and cross-references share the Study tab, switched between in
+   the header in place of the title (which still names the panel for screen readers) */
+.study-switch { flex: 1; }
+.panel:not([data-panel="notes"]):not([data-panel="xrefs"]) .study-switch { display: none; }
+@media (max-width: 899px) {
+  .panel:is([data-panel="notes"], [data-panel="xrefs"]) .panel-title {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; flex: none;
+  }
+}
 .panel-body {
   flex: 1;
   overflow-y: auto;

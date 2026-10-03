@@ -42,6 +42,8 @@ const state = {
   selectedVerse: null,
   highlight: null,
   panel: null,
+  // What the Study tab opens: commentary ("notes") or cross-references ("xrefs")
+  study: null,
   search: { query: "", scope: "all", results: null },
   strongs: { query: "", results: null, pending: false },
 };
@@ -337,6 +339,8 @@ function toast(message, ms = 1800) {
 function openPanel(name, { focus = true, section = null } = {}) {
   const wasOpen = state.panel !== null;
   state.panel = name;
+  // The Study tab opens whichever of these was used last
+  if (name === "notes" || name === "xrefs") state.study = name;
   panel.dataset.panel = name;
   panel.hidden = false;
   app.dataset.panelOpen = "true";
@@ -379,8 +383,16 @@ function syncNavState() {
   for (const b of document.querySelectorAll("[data-open-panel]")) {
     b.setAttribute("aria-pressed", String(b.dataset.openPanel === state.panel));
   }
+  for (const b of document.querySelectorAll("[data-study]")) {
+    const on = b.dataset.study === state.panel;
+    b.setAttribute("aria-checked", String(on));
+    b.tabIndex = on ? 0 : -1;
+  }
   for (const tab of document.querySelectorAll("[data-tab]")) {
-    const current = tab.dataset.tab === (state.panel ?? "read") || (tab.dataset.tab === "search" && state.panel === "strongs");
+    const current =
+      tab.dataset.tab === (state.panel ?? "read") ||
+      (tab.dataset.tab === "search" && state.panel === "strongs") ||
+      (tab.dataset.tab === "study" && (state.panel === "notes" || state.panel === "xrefs"));
     if (current) tab.setAttribute("aria-current", "page");
     else tab.removeAttribute("aria-current");
   }
@@ -713,14 +725,25 @@ function wireStaticControls() {
     );
   }
 
-  const tabs = { read: ["book", "Read"], search: ["search", "Search"], chat: ["chat", "Ask"], saved: ["bookmark", "Saved"], settings: ["settings", "Settings"] };
+  const tabs = { read: ["book", "Read"], study: ["notes", "Study"], search: ["search", "Search"], chat: ["chat", "Ask"], saved: ["bookmark", "Saved"], settings: ["settings", "Settings"] };
   for (const tab of document.querySelectorAll("[data-tab]")) {
     const [iconName, label] = tabs[tab.dataset.tab];
     tab.append(icon(iconName), h("span", {}, label));
-    tab.addEventListener("click", () => (tab.dataset.tab === "read" ? closePanel() : openPanel(tab.dataset.tab, { focus: false })));
+    tab.addEventListener("click", () => {
+      if (tab.dataset.tab === "read") closePanel();
+      // Commentary, or cross-references if they were what was open last
+      else if (tab.dataset.tab === "study") openPanel(state.study ?? "notes", { focus: false });
+      else openPanel(tab.dataset.tab, { focus: false });
+    });
+  }
+  // On phones the two share the Study tab, switched between in the panel's header
+  for (const b of document.querySelectorAll("[data-study]")) {
+    b.addEventListener("click", () => {
+      if (state.panel !== b.dataset.study) openPanel(b.dataset.study, { focus: false });
+    });
   }
 
-  const actionIcons = { notes: ["notes", "Notes"], xrefs: ["link", "Cross-refs"], "copy-verse": ["copy", "Copy"], "copy-chapter": ["chapter", "Copy chapter"] };
+  const actionIcons = { notes: ["notes", "Commentary"], xrefs: ["link", "Cross-refs"], "copy-verse": ["copy", "Copy"], "copy-chapter": ["chapter", "Copy chapter"] };
   for (const [action, [iconName, label]] of Object.entries(actionIcons)) {
     const b = actions.querySelector(`[data-action="${action}"]`);
     b.append(icon(iconName), h("span", { class: "action-label" }, label));

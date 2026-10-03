@@ -15,6 +15,7 @@ const AT_ONCE = 3;
 
 let seq = 0;
 let timer = null;
+const touch = window.matchMedia("(pointer: coarse)");
 // Draws the results in the panel on screen (a search outlives a redraw of the panel)
 let redraw = () => {};
 let known = null; // { commentaries, crossrefs }
@@ -320,6 +321,8 @@ export function renderSearch(body, ctx) {
     if (event.key === "Enter") {
       clearTimeout(timer);
       run();
+      // On a touch screen Search puts the keyboard away, to show the results
+      if (touch.matches) input.blur();
     }
   });
 
