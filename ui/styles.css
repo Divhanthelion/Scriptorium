@@ -889,12 +889,15 @@ input[readonly] { color: var(--muted); }
   color: var(--text-2);
 }
 .chip:hover { background: var(--surface-2); }
-.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.chip:is([aria-pressed="true"], [aria-checked="true"]) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .chip:disabled { opacity: 0.4; cursor: default; }
 
 /* ------------------------------------------------------------------ commentary */
 
 .notes-where { font-weight: 650; margin: 0 0 10px; }
+.notes-whole { margin-inline-start: 10px; min-height: 30px; padding: 0 8px; font-size: 0.8125rem; font-weight: 500; }
+.notes-nav { margin-top: 1.5rem; }
+.notes-hint { font-size: 0.8125rem; color: var(--muted); margin: 14px 0 0; }
 .notes-kjv { font-size: 0.875rem; color: var(--muted); margin: -6px 0 10px; }
 :is(.panel[data-panel="notes"], .panel[data-panel="xrefs"]) .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; }
 :is(.panel[data-panel="notes"], .panel[data-panel="xrefs"]) .chip { min-height: 30px; padding: 0 10px; font-size: 0.8125rem; }

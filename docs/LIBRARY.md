@@ -227,7 +227,10 @@ these hard cases.
   columns (on a phone, or beside a panel), they stack under each verse, each named.
   Books the KJV doesn't have (3 Maccabees, Psalm 151) are matched verse for verse by
   number. Panels show the chosen commentaries and cross-references for the selected
-  verse.
+  verse. With no verse selected, the Commentary panel reads one commentary through the
+  chapter: every note in order, open, the book's introduction with its first chapter
+  (a note begun in the chapter before folded, as it was read there), and the chapters
+  either side to read on. On a phone both panels are under the Study tab.
 
 ## Search
 

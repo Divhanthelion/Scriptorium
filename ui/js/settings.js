@@ -23,6 +23,7 @@ export const DEFAULTS = {
   // Hebrew and Greek
   parallel: ["original"],
   commentaries: null, // ids shown in the Commentary panel; null: all of them
+  reading: null, // the commentary read through a chapter in the Commentary panel
   crossrefs: null, // ids shown in the Cross-references panel; null: all of them
   // Where Search looks: the translation being read, the chosen translations and
   // commentaries, or everything
@@ -191,6 +192,7 @@ export function sanitize(raw) {
     translation: typeof s.translation === "string" && /^[a-z0-9]{1,20}$/.test(s.translation) ? s.translation : DEFAULTS.translation,
     parallel: (idList(s.parallel, 3) ?? [...DEFAULTS.parallel]),
     commentaries: Array.isArray(s.commentaries) ? s.commentaries.filter((c) => typeof c === "string" && /^[a-z0-9]{1,20}$/.test(c)).slice(0, 40) : null,
+    reading: typeof s.reading === "string" && /^[a-z0-9]{1,20}$/.test(s.reading) ? s.reading : null,
     crossrefs: Array.isArray(s.crossrefs) ? s.crossrefs.filter((c) => typeof c === "string" && /^[a-z0-9]{1,20}$/.test(c)).slice(0, 40) : null,
     search: {
       in: oneOf(s.search?.in, ["reading", "chosen", "everything"], DEFAULTS.search.in),

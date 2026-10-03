@@ -823,7 +823,8 @@ await test("Translations: the KJV keeps its interlinear and gains the Apocrypha"
 
 const NOTES_HELPERS = `
   const panel = $("#panel");
-  const where = () => panel.querySelector(".notes-where")?.textContent;
+  // (The heading's own words, not the button beside them)
+  const where = () => panel.querySelector(".notes-where")?.firstChild?.textContent;
   const section = (name) => $$("#panel .commentary").find((c) => c.querySelector(".commentary-name").textContent.startsWith(name));
   const labels = (name) => [...(section(name)?.querySelectorAll(".note-label .note-place") ?? [])].map((l) => l.textContent);
 `;
@@ -838,8 +839,9 @@ await test("Commentary: notes on the selected verse, through the KJV's numbering
   assert(panel.textContent.includes("Nothing on Psalms from Catena Aurea"), "Catena covers the Gospels only");
   $("#v5").click();
   await until(() => where() === "On Psalm 22:5" && labels("Treasury").join() === "Psalm 23:5", "follows the selected verse");
+  // No verse: a commentary read through the chapter (the KJV's Psalm 23)
   $('[data-action="deselect"]').click();
-  await until(() => /introductions/.test(where() ?? "") && labels("Matthew Henry").join() === "Psalm 23 (introduction)", "the chapter's introduction");
+  await until(() => where() === "Matthew Henry on Psalm 22" && labels("Matthew Henry").join() === "Psalm 23 (introduction),Psalm 23:1-6", "the whole chapter: " + where());
 `);
 
 await test("Commentary: choose commentaries and follow a reference", "book=John&chapter=3&tr=kjv&verse=16&select=1&panel=notes", {}, `${NOTES_HELPERS}
@@ -869,7 +871,42 @@ await test("Commentary: choose commentaries and follow a reference", "book=John&
   $("#panel-close").click();
   await until(() => $("#panel").hidden, "panel closed");
   $('[data-action="notes"]').click();
-  await until(() => !$("#panel").hidden && where() === "On Luke 2:14", "Notes from the verse bar");
+  await until(() => !$("#panel").hidden && where() === "On Luke 2:14", "Commentary from the verse bar");
+`);
+
+await test("Commentary: read a commentary through, chapter by chapter", "book=John&chapter=3&tr=kjv&verse=16&select=1&panel=notes", {}, `${NOTES_HELPERS}
+  await until(() => where() === "On John 3:16", "a verse's notes");
+  panel.querySelector(".notes-whole").click();
+  await until(() => where() === "Matthew Henry on John 3", "Matthew Henry on the whole chapter: " + where());
+  assert(!$(".verse[aria-current='true']"), "no verse selected");
+  assert(labels("Matthew Henry").join() === "John 3 (introduction),John 3:1-21,John 3:22-36", "every note, in order: " + labels("Matthew Henry"));
+  assert(!section("Matthew Henry").querySelector("details.note"), "open, however long");
+  assert($$("#panel .commentary").length === 1, "one commentary at a time");
+  // Another commentary, chosen from a menu; remembered
+  const pick = (id) => {
+    const s = $("#panel .notes-read-select");
+    s.value = id;
+    s.dispatchEvent(new Event("change"));
+  };
+  assert($("#panel .notes-read-select").value === "mhc", "Henry chosen");
+  pick("chrysostom");
+  await until(() => where() === "Chrysostom on John 3", "Chrysostom");
+  // His homily on John 2:23-3:4 was read with chapter 2: folded here, and said so
+  const read = () => $("#panel .commentary.reading");
+  const first = read().querySelector(".note");
+  assert(first.tagName === "DETAILS" && !first.open && first.textContent.includes("begun in an earlier chapter"), "the homily begun earlier, folded");
+  assert(read().querySelectorAll("section.note").length >= 6, "the rest open");
+  // On to the next chapter: the reader turns, and the panel follows, from the top
+  panel.querySelector(".panel-body, #panel-body")?.scrollTo?.(0, 5000);
+  const next = $$("#panel .notes-nav button").find((b) => b.textContent === "John 4");
+  next.click();
+  await until(() => $("#ref-label").textContent === "John 4" && where() === "Chrysostom on John 4", "John 4");
+  assert($("#panel-body").scrollTop === 0, "from the top");
+  const prev = $$("#panel .notes-nav button").find((b) => b.textContent === "John 3");
+  assert(prev, "and back to John 3");
+  // Back to Matthew Henry, for the tests after (settings persist)
+  pick("mhc");
+  await until(() => where() === "Matthew Henry on John 4", "Henry again");
 `);
 
 await test("Commentary: the Tyndale notes, book introductions, and articles", "book=Romans&chapter=2&tr=kjv&verse=8&select=1&panel=notes", {}, `${NOTES_HELPERS}
@@ -890,8 +927,16 @@ await test("Commentary: the Tyndale notes, book introductions, and articles", "b
     await until(() => $(".chapter-grid"), "chapters");
     $$(".chapter-grid button").find((b) => b.textContent === "1").click();
   }
-  await until(() => $("#ref-label").textContent === "Genesis 1" && /introductions/.test(where() ?? ""), "Genesis 1");
-  await until(() => labels("Tyndale Open Study Notes").join() === "Genesis (introduction),Genesis (introduction)", "Genesis's summary and introduction");
+  await until(() => $("#ref-label").textContent === "Genesis 1" && / on Genesis 1$/.test(where() ?? ""), "Genesis 1, read through");
+  const pick = (id) => {
+    const s = $("#panel .notes-read-select");
+    s.value = id;
+    s.dispatchEvent(new Event("change"));
+  };
+  pick("tyndale");
+  await until(() => labels("Tyndale Open Study Notes").slice(0, 2).join() === "Genesis (introduction),Genesis (introduction)", "Genesis's summary and introduction first");
+  pick("mhc");
+  await until(() => where() === "Matthew Henry on Genesis 1", "Henry again");
   // Articles on a passage fold, named by their titles
   $("#ref-button").click();
   await until(() => $("#picker").open, "book picker");
@@ -937,7 +982,8 @@ await test("Commentary: the Church Fathers, homily by homily", "book=Matthew&cha
 
 const XREF_HELPERS = `
   const panel = $("#panel");
-  const where = () => panel.querySelector(".notes-where")?.textContent;
+  // (The heading's own words, not the button beside them)
+  const where = () => panel.querySelector(".notes-where")?.firstChild?.textContent;
   const collection = (id) => panel.querySelector('[data-collection="' + id + '"]');
   const places = (id) => [...(collection(id)?.querySelectorAll(".xref") ?? [])];
   const label = (x) => x.querySelector(".xref-ref").textContent;

@@ -128,7 +128,7 @@ pub fn dispatch_all(
         "crossref_collections" => to_json(library.crossrefs()),
         "notes" => {
             let a: NotesArgs = parse(name, args)?;
-            to_json(crate::translations::notes(library, &a.commentaries, &a.bible, &a.book, a.chapter, a.verse)?)
+            to_json(crate::translations::notes(library, &a.commentaries, &a.bible, &a.book, a.chapter, a.verse, a.whole)?)
         }
         "crossrefs" => {
             let a: CrossrefsArgs = parse(name, args)?;
@@ -184,6 +184,9 @@ struct NotesArgs {
     chapter: u32,
     #[serde(default)]
     verse: u32,
+    /// Every note on the chapter, to read it through
+    #[serde(default)]
+    whole: bool,
 }
 
 #[derive(Deserialize)]

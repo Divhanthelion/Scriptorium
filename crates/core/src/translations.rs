@@ -216,6 +216,9 @@ pub struct NoteView {
     /// "John 3:14-16", "John 3 (introduction)", "John (introduction)"
     pub label: String,
     pub body: String,
+    /// Reading a whole chapter: the note begins in an earlier one (and was read there)
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub earlier: bool,
 }
 
 pub(crate) fn note_label(display: &str, code: &str, from: (u32, u32), to: (u32, u32)) -> String {
@@ -304,7 +307,10 @@ fn places_label(places: &[(String, u32, u32)]) -> String {
 /// translation `bible` (every commentary is keyed to the KJV, so the verse is mapped
 /// to the KJV first). Verse 0: the chapter's introductions (those of the KJV
 /// chapters it corresponds to), and with a book's first chapter, the book's.
-pub fn notes(lib: &Library, ids: &[String], bible: &str, book: &str, chapter: u32, verse: u32) -> Result<NotesOn, String> {
+/// Commentaries `ids`' notes on verse `verse` of chapter `chapter` of `book`, in
+/// translation `bible`; verse 0, the chapter's introductions (and the book's, with its
+/// first chapter); with `whole`, every note on the chapter, in order, to read it through.
+pub fn notes(lib: &Library, ids: &[String], bible: &str, book: &str, chapter: u32, verse: u32, whole: bool) -> Result<NotesOn, String> {
     let k = books::by_name(book).ok_or_else(|| format!("no book named {:?}", book))?;
     let places: Vec<(String, u32, u32)> = if verse == 0 {
         kjv_chapters(lib, bible, k.code, chapter)?.into_iter().map(|(code, c)| (code, c, 0)).collect()
@@ -329,13 +335,30 @@ pub fn notes(lib: &Library, ids: &[String], bible: &str, book: &str, chapter: u3
         let info = lib.commentaries().iter().find(|c| &c.id == id).ok_or_else(|| format!("no commentary {:?}", id))?;
         let mut notes: Vec<NoteView> = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for (code, c, v) in &lookups {
-            let display = books::by_code(code).map_or(code.as_str(), |b| b.display);
-            for n in lib.notes_on(id, code, *c, *v)? {
-                // The same note reached from two places once (a commentary may have two
-                // notes on one passage: Tyndale's book summary and introduction)
-                if seen.insert((code.clone(), n.from, n.to, n.body.clone())) {
-                    notes.push(NoteView { label: note_label(display, code, n.from, n.to), body: n.body });
+        // The same note reached from two places once (a commentary may have two notes on
+        // one passage: Tyndale's book summary and introduction)
+        let mut add = |code: &str, n: &kjv_library::notes::Note, earlier: bool| {
+            if seen.insert((code.to_string(), n.from, n.to, n.body.clone())) {
+                let display = books::by_code(code).map_or(code, |b| b.display);
+                notes.push(NoteView { label: note_label(display, code, n.from, n.to), body: n.body.clone(), earlier });
+            }
+        };
+        if whole && verse == 0 {
+            // The chapter read through: the book's introduction with its first chapter,
+            // then every note on the chapter in order (one begun in an earlier chapter
+            // first, marked)
+            for (code, c, _) in &places {
+                for n in lib.commentary_book(id, code)?.iter() {
+                    let book_level = n.from.0 == 0;
+                    if (book_level && *c == 1) || (!book_level && n.from.0 <= *c && n.to.0 >= *c) {
+                        add(code, n, !book_level && n.from.0 < *c);
+                    }
+                }
+            }
+        } else {
+            for (code, c, v) in &lookups {
+                for n in lib.notes_on(id, code, *c, *v)? {
+                    add(code, &n, false);
                 }
             }
         }

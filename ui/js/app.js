@@ -415,6 +415,7 @@ const ctx = {
   reference,
   goTo,
   openIn,
+  selectVerse,
   setHighlight,
   refreshPanel,
   openPanel,

@@ -18,7 +18,7 @@ A library for reading and studying the Bible: 44 English translations, commentar
 ## Reading and studying
 
 - **Parallel**: up to four translations side by side, or beside the Hebrew and Greek, verse by verse. Translations number some verses differently (the Psalms in the Douay-Rheims and the Septuagint, Malachi 4 in the Hebrew, the end of Romans in the WEB); every column is lined up through a verse alignment made from what the verses say, and numbered as that translation numbers it
-- **Commentary and Cross-references panels** for the verse you select, in any translation
+- **Commentary and Cross-references panels** for the verse you select, in any translation, or a commentary read straight through, chapter by chapter, beside the text
 - **Search** the translation you're reading, or chosen translations and commentaries, or everything at once, with results grouped by source as they arrive; `Caesar's` finds `Cæsar’s`
 - **Red letters**, the divine name in small capitals, poetry set in lines, and each translation's own notes
 - **Bookmarks and history**, light and dark themes, adjustable text size and font
