@@ -1,6 +1,7 @@
 name: Release
-# Push a tag like v0.2.0 (or run by hand) to build every platform.
-# Desktop installers go to a *draft* GitHub Release for review before publishing.
+# Push a tag like v0.2.0 to build every platform; desktop installers go to a *draft*
+# GitHub Release for review before publishing. Run by hand, it only builds (everything
+# is in the run's artifacts).
 on:
   push:
     tags: ["v*"]
@@ -73,8 +74,9 @@ jobs:
           projectPath: app
           tauriScript: cargo tauri
           args: ${{ matrix.args }}
+          # Without a tag, no release: tagName and releaseName both empty
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: Scriptorium ${{ github.ref_name }}
+          releaseName: ${{ github.ref_type == 'tag' && format('Scriptorium {0}', github.ref_name) || '' }}
           releaseBody: See the assets below for Windows, macOS, and Linux installers.
           releaseDraft: true
           prerelease: false
@@ -114,11 +116,12 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      # The runner image already has the Android SDK; add the NDK Tauri needs
+      # The runner image already has the Android SDK; add the NDK Tauri needs. r28 and
+      # later link for 16 KB memory pages, which Google Play requires (r27 doesn't).
       - name: Android NDK
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" > /dev/null
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;30.0.16248370" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android

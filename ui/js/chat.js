@@ -989,20 +989,38 @@ async function copyAnswer(ctx, m) {
 function report(ctx, m) {
   const p = provider(ctx);
   const question = [...chat.messages].slice(0, chat.messages.indexOf(m)).reverse().find((x) => x.role === "user")?.content ?? "";
-  const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
-  const body = [
-    "**What’s wrong with this answer?**",
-    "",
-    "",
-    `**Model:** ${p?.name ?? "?"} / ${ctx.settings.ai.model ?? "?"}`,
-    `**Question:** ${clip(question, 600)}`,
-    "",
-    "**Answer:**",
-    "",
-    clip(m.content, 2500).replace(/^/gm, "> "),
-  ].join("\n");
-  const url = `${APP.issues}/new?labels=ai-report&title=${encodeURIComponent("AI answer report")}&body=${encodeURIComponent(body)}`;
-  openExternal(url);
+  openExternal(reportUrl(`${p?.name ?? "?"} / ${ctx.settings.ai.model ?? "?"}`, question, m.content));
+}
+
+/** GitHub refuses longer links, and its sign-in page (which wraps the link again, for a
+ * reader who isn't signed in) refuses them from about 7,500 characters. */
+const REPORT_URL_MAX = 4000;
+
+/** The link to a prefilled report: the question and as much of the answer as fits. */
+export function reportUrl(model, question, answer) {
+  // By characters, not UTF-16 units: half an emoji can't be put in a link
+  const clip = (s, n) => {
+    const chars = Array.from(s);
+    return chars.length > n ? `${chars.slice(0, n).join("")}…` : s;
+  };
+  const link = (n) => {
+    const body = [
+      "**What’s wrong with this answer?**",
+      "",
+      "",
+      `**Model:** ${model}`,
+      `**Question:** ${clip(question, Math.min(600, n))}`,
+      "",
+      "**Answer:**",
+      "",
+      clip(answer, n).replace(/^/gm, "> "),
+    ].join("\n");
+    return `${APP.issues}/new?labels=ai-report&title=${encodeURIComponent("AI answer report")}&body=${encodeURIComponent(body)}`;
+  };
+  let n = 2500;
+  let url = link(n);
+  while (url.length > REPORT_URL_MAX && n > 50) url = link((n = Math.floor(n * 0.8)));
+  return url;
 }
 
 // ------------------------------------------------------------------ saved conversations

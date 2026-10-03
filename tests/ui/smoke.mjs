@@ -485,6 +485,18 @@ await test("Chat asks consent, then streams an answer about the attached chapter
   assert(lastAnswer().querySelector(".msg-reasoning summary").textContent.startsWith("Reasoning ·"), "reasoning kept apart");
   const refs = $$(".msg.assistant .ref-link").map((b) => b.textContent);
   assert(refs.join() === "John 11:35,Romans 12:15", "references linked: " + refs);
+  // Report: a prefilled GitHub issue, opened in the browser
+  const opened = [];
+  window.open = (url) => { opened.push(url); };
+  $$(".msg.assistant .msg-tools button").find((b) => b.textContent === "Report").click();
+  assert(opened.length === 1 && opened[0].startsWith("https://github.com/Divhanthelion/Scriptorium/issues/new?labels=ai-report&"), "report link: " + opened[0]);
+  const report = decodeURIComponent(opened[0].split("&body=")[1]);
+  assert(report.includes("**Question:** Why did Jesus weep?") && report.includes("mock-model") && report.includes("\\n> "), "the question, model, and answer: " + report);
+  // A long answer is shortened to a link GitHub accepts, and half an emoji never breaks it
+  const { reportUrl } = await import("./js/chat.js");
+  const long = reportUrl("m", "Why? 🙏".repeat(200), "Ἰησοῦς ἐδάκρυσεν, “Jesus wept.” וַיֵּבְךְּ 🙏\\n\\n".repeat(200));
+  assert(long.length <= 4000 && long.length > 3000, "long report link: " + long.length);
+  assert(decodeURIComponent(long).endsWith("…"), "marked as shortened");
   refs && $$(".msg.assistant .ref-link")[1].click();
   await until(() => $("#ref-label").textContent === "Romans 12" && $("#v15")?.getAttribute("aria-current") === "true", "reference opens the verse");
   await until(() => $(".chat-scope-label").textContent === "Reads: Romans 12", "the passage follows the reader");

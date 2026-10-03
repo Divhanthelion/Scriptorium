@@ -23,9 +23,12 @@ wait_loaded() {
       sleep 2
       return 0
     fi
+    # A slow emulator can raise "isn't responding" dialogs over the app
+    adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null 2>&1 || true
     sleep 2
   done
   echo "the app did not finish loading"
+  adb logcat -d | grep -iE "scriptorium|chromium|RustStdout|AndroidRuntime" | tail -60 || true
 }
 
 launch() {

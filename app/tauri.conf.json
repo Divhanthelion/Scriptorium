@@ -35,10 +35,10 @@
       "icons/icon.ico"
     ],
     "publisher": "Divhanthelion",
-    "copyright": "Copyright © 2025-2026 Divhanthelion. KJV text public domain; Hebrew/Greek data © STEP Bible, CC BY 4.0.",
-    "category": "Education",
-    "shortDescription": "KJV Bible with Hebrew and Greek interlinear",
-    "longDescription": "Read the King James Version with the Hebrew and Greek behind every verse: word-by-word interlinear with transliteration, Strong's numbers, grammar, and lexicon, following the Textus Receptus the KJV was translated from.",
+    "copyright": "Copyright © 2025-2026 Divhanthelion. Each translation, commentary, and dataset keeps its own licence (see Settings, Licences).",
+    "category": "Reference",
+    "shortDescription": "A Bible study library: translations, commentaries, and the Hebrew and Greek",
+    "longDescription": "A Bible study library on your device: 44 English translations, commentaries from the Church Fathers to the Reformation and after, cross-references, and the Hebrew and Greek behind the King James Version, all offline and searchable, with an optional study assistant that uses the AI service you choose.",
     "licenseFile": "../LICENSE"
   }
 }
