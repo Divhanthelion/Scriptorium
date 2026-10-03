@@ -23,15 +23,11 @@ async fn main() {
     }
     let model = args.get(3).cloned().unwrap_or_else(|| models[0].id.clone());
     let req = ChatRequest {
-        endpoint,
-        model,
         instructions: "You are a Bible study assistant. Answer in two sentences.".into(),
         context: "# John\n## John 11\n35 Jesus wept.\n".into(),
         messages: vec![Message { role: Role::User, content: "Why did Jesus weep here?".into() }],
         max_tokens: Some(2000),
-        effort: None,
-        thinking: false,
-        enable_thinking: None,
+        ..ChatRequest::new(endpoint, model)
     };
     let started = std::time::Instant::now();
     let mut first = None;

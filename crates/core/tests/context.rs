@@ -73,6 +73,16 @@ fn one_verse() {
     assert_eq!((none.text.as_str(), none.label.as_str()), ("", ""));
     assert!(context::instructions(lib(), &none).contains("No passage is attached"));
     assert!(context::instructions(lib(), &c).contains("The reader has attached John 3:16 below, inside <context>."));
+    // When it can look things up: it does, for what isn't attached, rather than recall it
+    let plain = context::instructions(lib(), &c);
+    assert!(plain.contains("attach it with \"Change\"") && !plain.contains("(read, search, lexicon)"));
+    let looking = context::instructions_with(lib(), &c, true);
+    assert!(looking.contains("Using what is attached, and what you look up:"), "{}", looking);
+    assert!(looking.contains("Look something up (read, search, lexicon) only for what the question needs"), "{}", looking);
+    assert!(!looking.contains("\"Change\""), "{}", looking);
+    let nothing = context::instructions_with(lib(), &none, true);
+    assert!(nothing.contains("No passage is attached to this conversation. Look up what the question needs"), "{}", nothing);
+    assert!(nothing.contains("- Quote exactly."), "{}", nothing);
 }
 
 #[test]

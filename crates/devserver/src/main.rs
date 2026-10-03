@@ -11,7 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
-use kjv_ai::Event;
+use kjv_ai::{Event, ToolCall, ToolOutput};
 use kjv_ai::assistant::{AskArgs, ModelsArgs};
 use kjv_ai::conversations::Conversations;
 use kjv_core::bundle::DataBundle;
@@ -299,11 +299,21 @@ fn chat(state: &State, args: Value) -> Receiver<Vec<u8>> {
     let (data, library, client, running) = (state.data.clone(), state.library.clone(), state.client.clone(), state.running.clone());
     state.runtime.spawn(async move {
         let result = async {
-            let request = tokio::task::spawn_blocking(move || kjv_ai::assistant::prepare(&data, &library, &a.args, key))
+            let (d, l, args) = (data.clone(), library.clone(), a.args.clone());
+            let request = tokio::task::spawn_blocking(move || kjv_ai::assistant::prepare(&d, &l, &args, key))
                 .await
                 .map_err(|e| e.to_string())??;
+            // What the model looks up is read from the library off the async threads
+            let look_up = |call: ToolCall, room: usize| {
+                let (data, library) = (data.clone(), library.clone());
+                async move {
+                    tokio::task::spawn_blocking(move || kjv_ai::assistant::look_up(&data, &library, &call, room)).await.unwrap_or_else(|e| {
+                        ToolOutput { label: "Couldn't look that up".into(), text: e.to_string(), failed: true }
+                    })
+                }
+            };
             tokio::select! {
-                r = kjv_ai::chat(&client, &request, |event: Event| {
+                r = kjv_ai::converse(&client, &request, look_up, |event: Event| {
                     send_line(&tx, serde_json::to_value(event).unwrap());
                 }) => r,
                 () = stop.notified() => {

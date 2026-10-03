@@ -53,6 +53,7 @@ export const DEFAULTS = {
     },
     sets: [], // saved contexts: { id, name, context }
     think: true, // let a local reasoning model think before answering
+    lookups: true, // let the assistant look up passages, notes, and lexicon entries itself
     // Providers the reader agreed to send questions to (keyed by id)
     consent: {},
     // Real ÷ estimated prompt tokens, per "provider|model", learned from replies
@@ -160,6 +161,7 @@ function sanitizeAi(raw) {
       .slice(0, 50)
       .map((x) => ({ id: x.id.slice(0, 40), name: x.name.trim().slice(0, 80), context: sanitizeContext(x.context) })),
     think: typeof a.think === "boolean" ? a.think : true,
+    lookups: typeof a.lookups === "boolean" ? a.lookups : true,
     consent: flags(a.consent),
     calibration: Object.fromEntries(
       Object.entries(isObject(a.calibration) ? a.calibration : {})

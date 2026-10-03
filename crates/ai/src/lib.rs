@@ -4,6 +4,10 @@
 //!
 //! Requests run in Rust, not the web page, so API keys never reach page scripts and
 //! local servers on the user's network are reachable from every platform.
+//!
+//! The model can be given tools ([`converse`]): it asks for something, the app looks
+//! it up, and the model carries on with what it found, a few rounds at most, all in
+//! one answer.
 
 mod anthropic;
 pub mod assistant;
@@ -13,10 +17,12 @@ mod openai;
 mod sse;
 mod think;
 
+use std::future::Future;
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub use sse::SseParser;
 pub use think::ThinkSplitter;
@@ -80,6 +86,87 @@ pub struct ChatRequest {
     /// understood by vLLM and llama.cpp); None leaves the server's default
     #[serde(default)]
     pub enable_thinking: Option<bool>,
+    /// Tools the model may call; none, and it answers from what it was given
+    #[serde(skip)]
+    pub tools: Vec<Tool>,
+    /// The instructions to give instead if the server turns out not to take tools
+    #[serde(skip)]
+    pub plain_instructions: Option<String>,
+    /// The model's context window, when known: what is looked up must fit in it
+    #[serde(default)]
+    pub context_window: Option<u64>,
+    /// This answer's rounds of looking things up so far
+    #[serde(skip)]
+    pub rounds: Vec<Round>,
+    /// Nothing more may be looked up: the model answers now
+    #[serde(skip)]
+    pub no_more_tools: bool,
+}
+
+impl ChatRequest {
+    /// A request to `model`, with everything else left to be set.
+    pub fn new(endpoint: Endpoint, model: impl Into<String>) -> ChatRequest {
+        ChatRequest {
+            endpoint,
+            model: model.into(),
+            instructions: String::new(),
+            context: String::new(),
+            messages: Vec::new(),
+            max_tokens: None,
+            effort: None,
+            thinking: false,
+            enable_thinking: None,
+            tools: Vec::new(),
+            plain_instructions: None,
+            context_window: None,
+            rounds: Vec::new(),
+            no_more_tools: false,
+        }
+    }
+}
+
+/// A tool the model may call.
+#[derive(Debug, Clone)]
+pub struct Tool {
+    pub name: &'static str,
+    pub description: String,
+    /// Its arguments, as a JSON Schema object (the subset every provider takes: types,
+    /// properties, required, enum, items, descriptions)
+    pub parameters: Value,
+}
+
+/// A tool call the model made.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolCall {
+    /// The provider's id for it, which its result must name
+    pub id: String,
+    pub name: String,
+    /// The arguments (null if the model's weren't JSON)
+    pub arguments: Value,
+}
+
+/// What came of a tool call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolOutput {
+    /// What was looked up, for the reader: "John 3:16 · WEB"
+    pub label: String,
+    /// What the model is given
+    pub text: String,
+    /// The call couldn't be carried out (`text` says why, for the model)
+    pub failed: bool,
+}
+
+/// One round of looking things up in the answer being written.
+#[derive(Debug, Clone, Default)]
+pub struct Round {
+    /// The model's message asking for it, as the provider sent it, to be sent back
+    /// exactly (some providers sign what the model thought)
+    pub said: Value,
+    /// Its reasoning, for providers that want it back within the answer (DeepSeek)
+    pub reasoning: String,
+    pub calls: Vec<ToolCall>,
+    /// What each call got, in order
+    pub results: Vec<String>,
 }
 
 /// Something the model produced, in order.
@@ -90,6 +177,9 @@ pub enum Event {
     /// Reasoning the model shows while it thinks (summaries on some services)
     Reasoning { text: String },
     Usage { usage: Usage },
+    /// The model looked something up: what (for the reader), how much it got, and the
+    /// text it was given
+    Lookup { id: String, tool: String, label: String, tokens: usize, text: String, failed: bool },
     /// The answer is complete. `reason` is normalized: "stop", "length", "refusal", or
     /// the provider's own word for anything else.
     Done { reason: Option<String> },
@@ -102,6 +192,10 @@ pub struct Usage {
     pub output_tokens: Option<u64>,
     /// Input tokens read from the provider's prompt cache
     pub cached_tokens: Option<u64>,
+    /// Which request of the answer this is, from 0, when it looked things up (each
+    /// round of looking up is a request of its own, with what was found added)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub round: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,47 +229,181 @@ pub fn client() -> reqwest::Client {
 
 /// Stream a reply, calling `emit` for each piece. Dropping the returned future
 /// closes the connection, which stops generation on the server.
-pub async fn chat(client: &reqwest::Client, req: &ChatRequest, mut emit: impl FnMut(Event)) -> Result<(), String> {
-    if req.model.trim().is_empty() {
-        return Err("Choose a model first.".into());
-    }
-    let (request, mut decoder): (reqwest::RequestBuilder, Box<dyn Decoder>) = match req.endpoint.kind {
-        Kind::OpenAi => (openai::request(client, req, true), Box::new(openai::Decoder::default())),
-        Kind::Anthropic => (anthropic::request(client, req), Box::new(anthropic::Decoder::default())),
-        Kind::Gemini => (gemini::request(client, req), Box::new(gemini::Decoder::default())),
-    };
-    let mut response = send(request).await?;
-    // Some OpenAI-compatible servers reject the usage option; ask again without it
-    if req.endpoint.kind == Kind::OpenAi && response.status() == reqwest::StatusCode::BAD_REQUEST {
-        let body = response.text().await.unwrap_or_default();
-        if !body.contains("stream_options") {
-            return Err(http_error(reqwest::StatusCode::BAD_REQUEST, &body));
+pub async fn chat(client: &reqwest::Client, req: &ChatRequest, mut emit: impl FnMut(Event) + Send) -> Result<(), String> {
+    let mut decoder = decoder(req.endpoint.kind);
+    let reason = stream(client, req, &mut *decoder, &mut emit).await.map_err(StreamError::message)?;
+    emit(Event::Done { reason });
+    Ok(())
+}
+
+/// Most rounds of looking things up in one answer, and calls in all: then it answers
+/// with what it has
+const MAX_ROUNDS: usize = 6;
+const MAX_CALLS: usize = 16;
+/// Most tokens one lookup gives the model
+const LOOKUP_TOKENS: usize = 24_000;
+/// Tokens all of an answer's lookups may come to when the context window isn't known
+const LOOKUPS_UNKNOWN_WINDOW: usize = 100_000;
+
+/// Stream a reply as [`chat`] does, letting the model call `req.tools`: `run(call,
+/// room)` carries out a call, giving at most `room` tokens, and the model carries on
+/// with what it got. Its text and reasoning stream throughout; each lookup is an
+/// [`Event::Lookup`]; [`Event::Done`] comes once, at the end.
+pub async fn converse<F, Fut>(client: &reqwest::Client, req: &ChatRequest, mut run: F, mut emit: impl FnMut(Event) + Send) -> Result<(), String>
+where
+    F: FnMut(ToolCall, usize) -> Fut + Send,
+    Fut: Future<Output = ToolOutput> + Send,
+{
+    let mut req = req.clone();
+    let mut calls = 0;
+    // What the request holds before anything is looked up, and what lookups have added
+    let base = req.messages.iter().fold(estimate(&req.instructions) + estimate(&req.context), |n, m| n + estimate(&m.content));
+    let mut looked_up = 0;
+    loop {
+        let round = req.rounds.len() as u32;
+        let tag = (!req.tools.is_empty()).then_some(round);
+        let mut decoder = decoder(req.endpoint.kind);
+        let mut forward = |event: Event| match event {
+            Event::Usage { mut usage } => {
+                usage.round = tag;
+                emit(Event::Usage { usage });
+            }
+            other => emit(other),
+        };
+        let reason = match stream(client, &req, &mut *decoder, &mut forward).await {
+            Ok(reason) => reason,
+            // A server that doesn't take tools: the question again, without them
+            Err(StreamError::NoTools(_)) if round == 0 => {
+                req.tools.clear();
+                if let Some(plain) = req.plain_instructions.take() {
+                    req.instructions = plain;
+                }
+                decoder = self::decoder(req.endpoint.kind);
+                stream(client, &req, &mut *decoder, &mut forward).await.map_err(StreamError::message)?
+            }
+            Err(e) => return Err(e.message()),
+        };
+        let asked = decoder.take_round().filter(|(_, _, c)| !c.is_empty() && !req.tools.is_empty() && !req.no_more_tools);
+        let Some((said, reasoning, round_calls)) = asked else {
+            emit(Event::Done { reason });
+            return Ok(());
+        };
+        let mut results = Vec::with_capacity(round_calls.len());
+        for call in &round_calls {
+            calls += 1;
+            let room = match req.context_window {
+                Some(window) => (window as usize).saturating_sub(base + looked_up + req.max_tokens.unwrap_or(16_000) as usize + 2_000),
+                None => LOOKUPS_UNKNOWN_WINDOW.saturating_sub(looked_up),
+            }
+            .min(LOOKUP_TOKENS);
+            let out = if room < 500 {
+                ToolOutput {
+                    label: "Nothing more: no room".into(),
+                    text: "There is no room left in this conversation to look up more. Answer with what you have, and say what you couldn't look up.".into(),
+                    failed: true,
+                }
+            } else {
+                run(call.clone(), room).await
+            };
+            let tokens = estimate(&out.text);
+            looked_up += tokens;
+            emit(Event::Lookup { id: call.id.clone(), tool: call.name.clone(), label: out.label, tokens, text: out.text.clone(), failed: out.failed });
+            results.push(out.text);
         }
-        response = send(openai::request(client, req, false)).await?;
+        req.rounds.push(Round { said, reasoning, calls: round_calls, results });
+        if req.rounds.len() >= MAX_ROUNDS || calls >= MAX_CALLS {
+            req.no_more_tools = true;
+        }
+    }
+}
+
+fn estimate(text: &str) -> usize {
+    kjv_core::context::estimate_tokens(text)
+}
+
+fn decoder(kind: Kind) -> Box<dyn Decoder> {
+    match kind {
+        Kind::OpenAi => Box::new(openai::Decoder::default()),
+        Kind::Anthropic => Box::new(anthropic::Decoder::default()),
+        Kind::Gemini => Box::new(gemini::Decoder::default()),
+    }
+}
+
+enum StreamError {
+    /// The server doesn't take tools (its message)
+    NoTools(String),
+    Other(String),
+}
+
+impl StreamError {
+    fn message(self) -> String {
+        match self {
+            StreamError::NoTools(m) | StreamError::Other(m) => m,
+        }
+    }
+}
+
+/// One request: its text, reasoning, and usage to `emit` as they come. Returns why it
+/// stopped (not sent as an event: the caller decides when the answer is done).
+async fn stream(
+    client: &reqwest::Client,
+    req: &ChatRequest,
+    decoder: &mut dyn Decoder,
+    emit: &mut (dyn FnMut(Event) + Send),
+) -> Result<Option<String>, StreamError> {
+    if req.model.trim().is_empty() {
+        return Err(StreamError::Other("Choose a model first.".into()));
+    }
+    let request = match req.endpoint.kind {
+        Kind::OpenAi => openai::request(client, req, true),
+        Kind::Anthropic => anthropic::request(client, req),
+        Kind::Gemini => gemini::request(client, req),
+    };
+    let mut response = send(request).await.map_err(StreamError::Other)?;
+    if response.status() == reqwest::StatusCode::BAD_REQUEST {
+        let body = response.text().await.unwrap_or_default();
+        // Local servers that take no tools say so ("does not support tools", "tool
+        // choice requires --enable-auto-tool-choice", "tools param requires --jinja")
+        if !req.tools.is_empty() && req.endpoint.kind == Kind::OpenAi && body.to_lowercase().contains("tool") {
+            return Err(StreamError::NoTools(http_error(reqwest::StatusCode::BAD_REQUEST, &body)));
+        }
+        // Some OpenAI-compatible servers reject the usage option; ask again without it
+        if req.endpoint.kind != Kind::OpenAi || !body.contains("stream_options") {
+            return Err(StreamError::Other(http_error(reqwest::StatusCode::BAD_REQUEST, &body)));
+        }
+        response = send(openai::request(client, req, false)).await.map_err(StreamError::Other)?;
     }
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(http_error(status, &body));
+        return Err(StreamError::Other(http_error(status, &body)));
     }
 
     let mut parser = SseParser::default();
     let mut stream = response.bytes_stream();
-    let mut finished = false;
+    let mut reason = None;
+    let mut done = |event: Event, reason: &mut Option<Option<String>>| match event {
+        Event::Done { reason: r } => *reason = Some(r),
+        other => emit(other),
+    };
+    let mut events = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("The connection dropped: {}", plain_error(&e)))?;
+        let chunk = chunk.map_err(|e| StreamError::Other(format!("The connection dropped: {}", plain_error(&e))))?;
         for data in parser.push(&chunk) {
-            finished |= decoder.decode(&data, &mut emit)?;
+            decoder.decode(&data, &mut |e| events.push(e)).map_err(StreamError::Other)?;
+            for e in events.drain(..) {
+                done(e, &mut reason);
+            }
         }
     }
     for data in parser.finish() {
-        finished |= decoder.decode(&data, &mut emit)?;
+        decoder.decode(&data, &mut |e| events.push(e)).map_err(StreamError::Other)?;
     }
-    decoder.flush(&mut emit);
-    if !finished {
-        emit(Event::Done { reason: None });
+    decoder.flush(&mut |e| events.push(e));
+    for e in events.drain(..) {
+        done(e, &mut reason);
     }
-    Ok(())
+    Ok(reason.flatten())
 }
 
 /// Models the service offers, with context sizes where it reports them.
@@ -206,6 +434,11 @@ pub async fn models(client: &reqwest::Client, endpoint: &Endpoint) -> Result<Vec
 trait Decoder: Send {
     fn decode(&mut self, data: &str, emit: &mut dyn FnMut(Event)) -> Result<bool, String>;
     fn flush(&mut self, _emit: &mut dyn FnMut(Event)) {}
+    /// After the reply: if the model called tools, its message as the provider wants it
+    /// back, its reasoning, and the calls
+    fn take_round(&mut self) -> Option<(Value, String, Vec<ToolCall>)> {
+        None
+    }
 }
 
 fn url(base: &str, path: &str) -> String {

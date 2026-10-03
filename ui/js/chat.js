@@ -591,7 +591,7 @@ function fillMessage(ctx, node, m) {
     : m.reason === "refusal" ? h("p", { class: "chat-note" }, "The model declined to answer this.")
     : m.reason === "cancelled" ? h("p", { class: "chat-note" }, "Stopped.")
     : null;
-  const waiting = m.streaming && !m.content && !m.reasoning ? h("p", { class: "chat-note typing" }, "Waiting for the model…") : null;
+  const waiting = m.streaming && !m.content && !m.reasoning && !m.lookups?.length ? h("p", { class: "chat-note typing" }, "Waiting for the model…") : null;
   const tools =
     !m.streaming && (m.content || m.error)
       ? h(
@@ -608,7 +608,33 @@ function fillMessage(ctx, node, m) {
             : null,
         )
       : null;
-  replace(node, thinking, waiting, body, status, tools);
+  replace(node, thinking, lookupList(m), waiting, body, status, tools);
+}
+
+const LOOKUP_VERBS = { read: "Read", search: "Searched for", lexicon: "Looked up" };
+
+/** What the assistant looked up, one line each, its text shown on request (while the
+ * answer is open: saved conversations keep only what was looked up, not its text). */
+function lookupList(m) {
+  return h(
+    "div",
+    { class: "msg-lookups", hidden: !m.lookups?.length },
+    h("ul", { class: "lookup-list", "aria-label": "Looked up" }, (m.lookups ?? []).map(lookupItem)),
+  );
+}
+
+function lookupItem(l) {
+  const line = [
+    l.failed ? null : h("span", { class: "lookup-verb" }, `${LOOKUP_VERBS[l.tool] ?? "Looked up"} `),
+    l.label,
+    h("span", { class: "muted" }, l.failed ? "" : ` · ${compact(l.tokens)} tokens`),
+  ];
+  if (!l.text) return h("li", { class: `lookup${l.failed ? " failed" : ""}` }, line);
+  return h(
+    "li",
+    { class: `lookup${l.failed ? " failed" : ""}` },
+    h("details", {}, h("summary", {}, line), h("pre", { class: "lookup-text", tabindex: "0" }, l.text)),
+  );
 }
 
 function markdownOptions(ctx) {
@@ -653,6 +679,8 @@ function attachLive(node, m) {
     // Once the reader opens, closes, or scrolls the reasoning, it's theirs to manage
     touched: false,
     body: node.querySelector(".msg-body"),
+    lookups: node.querySelector(".msg-lookups"),
+    lookupsShown: m.lookups?.length ?? 0,
   });
   const touch = () => { live.touched = true; };
   thinking.querySelector("summary").addEventListener("click", touch);
@@ -693,6 +721,12 @@ function drawStreaming(ctx) {
       }
     }
     if (m.reasoning) live.summary.textContent = reasoningSummary(m);
+    if ((m.lookups?.length ?? 0) > live.lookupsShown) {
+      node.querySelector(".typing")?.remove();
+      live.lookups.hidden = false;
+      live.lookups.firstChild.append(...m.lookups.slice(live.lookupsShown).map(lookupItem));
+      live.lookupsShown = m.lookups.length;
+    }
     if (m.content) {
       node.querySelector(".typing")?.remove();
       // Fold the reasoning away when the answer starts, unless the reader is in it
@@ -768,7 +802,9 @@ function drawConsent(ctx) {
     h(
       "p",
       {},
-      `Your question, this conversation, and the attached Scripture will be sent to ${host}. `,
+      ctx.settings.ai.lookups
+        ? `Your question, this conversation, the attached Scripture, and whatever the assistant looks up in the library will be sent to ${host}. `
+        : `Your question, this conversation, and the attached Scripture will be sent to ${host}. `,
       p.preset === "local"
         ? "That’s your own server."
         : `${p.name}’s terms and privacy policy apply. ${APP.name} doesn’t see or keep any of it.`,
@@ -859,7 +895,7 @@ async function sendNow(ctx) {
   const id = `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   chat.requestId = id;
   const sentScopeTokens = size.tokens ?? 0;
-  const estimate = sentScopeTokens + INSTRUCTION_TOKENS + history.reduce((n, m) => n + estimateTokens(m.content), 0);
+  const estimate = sentScopeTokens + (size.instructions ?? INSTRUCTION_TOKENS) + history.reduce((n, m) => n + estimateTokens(m.content), 0);
   const key = calibrationKey(ctx);
   drawMessages(ctx);
   // Asking a question means wanting to see the answer
@@ -882,15 +918,27 @@ async function sendNow(ctx) {
         maxTokens: answerTokens(ctx),
         thinking: !!info?.adaptiveThinking,
         enableThinking: canThink(p) ? ai.think : null,
+        lookups: ai.lookups,
+        contextWindow: limit ?? null,
       },
       (event) => {
         if (event.type === "text") answer.content += event.text;
         else if (event.type === "reasoning") answer.reasoning += event.text;
-        else if (event.type === "usage") {
-          answer.usage = event.usage;
-          // Learn how this model's tokenizer compares with the estimate, when
-          // the Scripture is most of the prompt
-          const real = event.usage.inputTokens;
+        else if (event.type === "lookup") {
+          (answer.lookups ??= []).push({ tool: event.tool, label: event.label, tokens: event.tokens, failed: event.failed, text: event.text });
+          // What it wrote before looking up ("Let me check the WEB") ends there
+          if (answer.content.trim() && !answer.content.endsWith("\n\n")) answer.content = `${answer.content.trimEnd()}\n\n`;
+        } else if (event.type === "usage") {
+          // Each round of looking things up is a request of its own: the answer's
+          // tokens are theirs added up
+          const later = event.usage.round > 0 && answer.usage;
+          answer.usage = later
+            ? Object.fromEntries(["inputTokens", "outputTokens", "cachedTokens"].map((k) => [k, (answer.usage[k] ?? 0) + (event.usage[k] ?? 0)]))
+            : event.usage;
+          // Learn how this model's tokenizer compares with the estimate, when the
+          // Scripture is most of the prompt (from the first request, which is the one
+          // the estimate is of)
+          const real = later ? 0 : event.usage.inputTokens;
           if (real && sentScopeTokens > 2000) {
             const ratio = real / estimate;
             ctx.changeSettings((s) => {
@@ -978,7 +1026,9 @@ async function saveCurrent(ctx) {
     starred: c.starred,
     provider: p?.name ?? null,
     model: ctx.settings.ai.model,
-    messages: chat.messages.map(({ streaming, ...m }) => m),
+    // (What was looked up is kept by name and size; its text was the library's, and
+    // stays there)
+    messages: chat.messages.map(({ streaming, ...m }) => (m.lookups ? { ...m, lookups: m.lookups.map(({ text, ...l }) => l) } : m)),
   };
   try {
     await conversationSave(conversation);
@@ -1190,6 +1240,27 @@ export function renderAiSettings(ctx) {
       editing.form = { id: null, preset: "local", name: "", baseUrl: "", key: "", contextWindow: "" };
       ctx.refreshPanel();
     } }, icon("plus"), "Add a provider"),
+    h(
+      "div",
+      { class: "setting" },
+      h(
+        "span",
+        { class: "setting-label", id: "set-lookups" },
+        "Let it look things up",
+        h("span", { class: "setting-hint" }, "When a question needs more than you attached, the assistant reads it from the library: passages in any translation, commentaries, lexicon entries, and searches. What it reads is sent to the service, like attached text."),
+      ),
+      h("button", {
+        class: "switch",
+        type: "button",
+        role: "switch",
+        "aria-checked": String(ai.lookups),
+        "aria-labelledby": "set-lookups",
+        onclick: () => {
+          ctx.changeSettings((s) => { s.ai.lookups = !s.ai.lookups; });
+          ctx.refreshPanel();
+        },
+      }),
+    ),
   ];
 }
 

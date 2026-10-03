@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use kjv_core::bundle::DataBundle;
 use kjv_ai::assistant::{AskArgs, ModelsArgs};
 use kjv_ai::conversations::Conversations;
-use kjv_ai::{Event, ModelInfo};
+use kjv_ai::{Event, ModelInfo, ToolCall, ToolOutput};
 use kjv_core::dispatch::dispatch_all;
 use kjv_library::Library;
 use serde_json::Value;
@@ -136,8 +136,14 @@ async fn ai_chat(ai: State<'_, Ai>, id: String, args: AskArgs, on_event: Channel
         let send = |event: Event| {
             let _ = on_event.send(event);
         };
+        // What the model looks up is read from the library off the async threads
+        let look_up = |call: ToolCall, room: usize| async move {
+            tauri::async_runtime::spawn_blocking(move || kjv_ai::assistant::look_up(data(), library(), &call, room))
+                .await
+                .unwrap_or_else(|e| ToolOutput { label: "Couldn't look that up".into(), text: e.to_string(), failed: true })
+        };
         tokio::select! {
-            result = kjv_ai::chat(&ai.client, &request, send) => result,
+            result = kjv_ai::converse(&ai.client, &request, look_up, send) => result,
             // Dropping the request closes the connection, so the server stops generating
             () = stop.notified() => {
                 let _ = on_event.send(Event::Done { reason: Some("cancelled".into()) });

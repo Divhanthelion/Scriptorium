@@ -29,7 +29,7 @@ A library for reading and studying the Bible: 44 English translations, commentar
 
 Ask about exactly what you choose: a verse from Luke, two from Romans, and a chapter of Micah, say, in any of the translations, with notes from any of the commentaries, cross-references with their words, and the Hebrew and Greek if you like. It shows how much that is against the model's window, shows exactly what is sent (and lets you copy it for any assistant), saves contexts to use again, and remembers what each conversation was asked with.
 
-Use your own AI: a server on your network (vLLM, Ollama, LM Studio, llama.cpp) or your API key for Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, or Groq. Keys stay in the system keychain; your questions go only to the provider you set up. The assistant is told to quote exactly what is attached, to cite every quotation, and to say when something it needs isn't attached; [docs/ASSISTANT.md](docs/ASSISTANT.md) shows how that was tested and tuned.
+Use your own AI: a server on your network (vLLM, Ollama, LM Studio, llama.cpp) or your API key for Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, or Groq. Keys stay in the system keychain; your questions go only to the provider you set up. When a question needs more than you attached, the assistant looks it up in the library itself (any passage, translation, commentary, or lexicon entry, or a search) and shows what it read. It is told to quote exactly and cite every quotation; [docs/ASSISTANT.md](docs/ASSISTANT.md) shows how that was tested and tuned.
 
 ![John 3:16 with the Commentary panel open: Matthew Henry, the Tyndale Open Study Notes, Chrysostom, and Augustine](assets/screenshots/commentary-john-3-16.jpg)
 

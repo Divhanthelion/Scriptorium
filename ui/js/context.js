@@ -148,10 +148,12 @@ export async function sizeOf(ctx, c, previous = null) {
     // Sized without checking ids; Rust names any that are unknown
   }
   const { spec, index } = resolve(ctx, c, known);
-  const key = JSON.stringify(spec);
+  const lookups = !!ctx.settings.ai.lookups;
+  const key = JSON.stringify([spec, lookups]);
   if (previous && previous.key === key && !previous.error) return previous;
   if (!spec.passages.length) return { key, spec, index, label: "", tokens: 0, verses: 0, capped: false, passages: [] };
-  const size = await call("context_size", { context: spec });
+  // (The instructions differ, and the tools' definitions are sent, when it may look things up)
+  const size = await call("context_size", { context: spec, lookups });
   return { key, spec, index, ...size };
 }
 
@@ -747,7 +749,7 @@ function previewSection(ctx, c) {
     try {
       const known = await loadCatalogues().catch(() => null);
       const { spec } = resolve(ctx, c, known);
-      const t = await call("context_text", { context: spec });
+      const t = await call("context_text", { context: spec, lookups: !!ctx.settings.ai.lookups });
       editor.preview = { full: t.text ? `${t.instructions}\n\n${t.text}` : t.instructions, tokens: t.tokens };
     } catch (error) {
       editor.preview = { error: String(error.message ?? error) };
@@ -782,6 +784,9 @@ function previewSection(ctx, c) {
               h("pre", { class: "ctx-preview", tabindex: "0" }, p.full.length > PREVIEW_CHARS ? p.full.slice(0, PREVIEW_CHARS) : p.full),
               p.full.length > PREVIEW_CHARS
                 ? h("p", { class: "muted small" }, `Showing the first ${PREVIEW_CHARS.toLocaleString()} characters. Copy all takes everything.`)
+                : null,
+              ctx.settings.ai.lookups
+                ? h("p", { class: "muted small" }, "Sent with it: the three tools the assistant can use to look things up (read, search, and lexicon), which name the library’s translations, commentaries, and cross-references. Counted in the tokens above.")
                 : null,
             ],
   );

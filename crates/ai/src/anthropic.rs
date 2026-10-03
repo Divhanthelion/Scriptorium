@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::{ChatRequest, Endpoint, Event, ModelInfo, Role, Usage, url};
+use crate::{ChatRequest, Endpoint, Event, ModelInfo, Role, ToolCall, Usage, url};
 
 const VERSION: &str = "2023-06-01";
 /// Models that take `fallbacks: "default"`: if a safety classifier declines a
@@ -17,7 +17,7 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest) -> reqwest::RequestB
         // don't pay for it again
         system.push(json!({"type": "text", "text": req.context, "cache_control": {"type": "ephemeral"}}));
     }
-    let messages: Vec<Value> = req
+    let mut messages: Vec<Value> = req
         .messages
         .iter()
         .map(|m| {
@@ -27,6 +27,24 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest) -> reqwest::RequestB
             })
         })
         .collect();
+    // This answer's lookups: the model's message as it came (its thinking signed, so
+    // sent back unchanged), then what each call got
+    for (i, round) in req.rounds.iter().enumerate() {
+        messages.push(round.said.clone());
+        let mut results: Vec<Value> = round
+            .calls
+            .iter()
+            .zip(&round.results)
+            .map(|(call, result)| json!({"type": "tool_result", "tool_use_id": call.id, "content": result}))
+            .collect();
+        // The latest lookups end the part to cache, so the next round reads them cheaply
+        if i + 1 == req.rounds.len()
+            && let Some(last) = results.last_mut()
+        {
+            last["cache_control"] = json!({"type": "ephemeral"});
+        }
+        messages.push(json!({"role": "user", "content": results}));
+    }
     let mut body = json!({
         "model": req.model,
         "max_tokens": req.max_tokens.unwrap_or(16000),
@@ -34,6 +52,14 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest) -> reqwest::RequestB
         "system": system,
         "messages": messages,
     });
+    if !req.tools.is_empty() {
+        let tools: Vec<Value> =
+            req.tools.iter().map(|t| json!({"name": t.name, "description": t.description, "input_schema": t.parameters})).collect();
+        body["tools"] = json!(tools);
+        if req.no_more_tools {
+            body["tool_choice"] = json!({"type": "none"});
+        }
+    }
     if req.thinking {
         body["thinking"] = json!({"type": "adaptive", "display": "summarized"});
     }
@@ -83,6 +109,16 @@ pub struct Decoder {
     /// Prompt tokens from `message_start`, including cache reads and writes
     input: Option<u64>,
     cached: Option<u64>,
+    /// The reply's content blocks as they come (thinking, text, tool calls), to send
+    /// back when it calls tools; and each tool call's input, streamed as JSON pieces
+    blocks: Vec<(Value, String)>,
+}
+
+impl Decoder {
+    fn block(&mut self, event: &Value) -> Option<&mut (Value, String)> {
+        let i = event.get("index").and_then(Value::as_u64)? as usize;
+        self.blocks.get_mut(i)
+    }
 }
 
 impl crate::Decoder for Decoder {
@@ -97,20 +133,54 @@ impl crate::Decoder for Decoder {
                 self.input = Some(n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens"));
                 self.cached = usage.get("cache_read_input_tokens").and_then(Value::as_u64);
             }
+            "content_block_start" => {
+                if let Some(i) = event.get("index").and_then(Value::as_u64).map(|i| i as usize).filter(|&i| i < 256) {
+                    while self.blocks.len() <= i {
+                        self.blocks.push((Value::Null, String::new()));
+                    }
+                    self.blocks[i] = (event["content_block"].clone(), String::new());
+                }
+            }
             "content_block_delta" => {
-                let delta = &event["delta"];
+                let delta = event["delta"].clone();
+                let piece = |key: &str| delta.get(key).and_then(Value::as_str).unwrap_or("").to_string();
                 match delta.get("type").and_then(Value::as_str) {
                     Some("text_delta") => {
-                        if let Some(text) = delta.get("text").and_then(Value::as_str) {
-                            emit(Event::Text { text: text.to_string() });
+                        let text = piece("text");
+                        if let Some((b, _)) = self.block(&event) {
+                            b["text"] = json!(format!("{}{}", b["text"].as_str().unwrap_or(""), text));
                         }
+                        emit(Event::Text { text });
                     }
                     Some("thinking_delta") => {
-                        if let Some(text) = delta.get("thinking").and_then(Value::as_str).filter(|t| !t.is_empty()) {
-                            emit(Event::Reasoning { text: text.to_string() });
+                        let text = piece("thinking");
+                        if let Some((b, _)) = self.block(&event) {
+                            b["thinking"] = json!(format!("{}{}", b["thinking"].as_str().unwrap_or(""), text));
+                        }
+                        if !text.is_empty() {
+                            emit(Event::Reasoning { text });
+                        }
+                    }
+                    Some("signature_delta") => {
+                        let signature = piece("signature");
+                        if let Some((b, _)) = self.block(&event) {
+                            b["signature"] = json!(format!("{}{}", b["signature"].as_str().unwrap_or(""), signature));
+                        }
+                    }
+                    Some("input_json_delta") => {
+                        let json = piece("partial_json");
+                        if let Some((_, input)) = self.block(&event) {
+                            input.push_str(&json);
                         }
                     }
                     _ => {}
+                }
+            }
+            "content_block_stop" => {
+                if let Some((b, input)) = self.block(&event)
+                    && b.get("type").and_then(Value::as_str) == Some("tool_use")
+                {
+                    b["input"] = serde_json::from_str(if input.trim().is_empty() { "{}" } else { input }).unwrap_or(json!({}));
                 }
             }
             "message_delta" => {
@@ -119,6 +189,7 @@ impl crate::Decoder for Decoder {
                         input_tokens: self.input,
                         output_tokens: event.pointer("/usage/output_tokens").and_then(Value::as_u64),
                         cached_tokens: self.cached,
+                        round: None,
                     },
                 });
                 if let Some(reason) = event.pointer("/delta/stop_reason").and_then(Value::as_str) {
@@ -142,12 +213,34 @@ impl crate::Decoder for Decoder {
         }
         Ok(false)
     }
+
+    fn take_round(&mut self) -> Option<(Value, String, Vec<ToolCall>)> {
+        let blocks: Vec<Value> = std::mem::take(&mut self.blocks)
+            .into_iter()
+            .map(|(b, _)| b)
+            // (An empty text block isn't allowed back)
+            .filter(|b| b.is_object() && !(b["type"] == "text" && b["text"].as_str().is_none_or(str::is_empty)))
+            .collect();
+        let calls: Vec<ToolCall> = blocks
+            .iter()
+            .filter(|b| b["type"] == "tool_use")
+            .map(|b| ToolCall {
+                id: b["id"].as_str().unwrap_or("").to_string(),
+                name: b["name"].as_str().unwrap_or("").to_string(),
+                arguments: b["input"].clone(),
+            })
+            .collect();
+        if calls.is_empty() {
+            return None;
+        }
+        Some((json!({"role": "assistant", "content": blocks}), String::new(), calls))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Decoder as _;
+    use crate::{Decoder as _, Round, Tool};
 
     #[test]
     fn streams_thinking_text_cached_usage_and_refusal() {
@@ -170,11 +263,70 @@ mod tests {
                 Event::Reasoning { text: "Checking.".into() },
                 Event::Text { text: "Amen.".into() },
                 Event::Usage {
-                    usage: Usage { input_tokens: Some(5020), output_tokens: Some(7), cached_tokens: Some(5000) }
+                    usage: Usage { input_tokens: Some(5020), output_tokens: Some(7), cached_tokens: Some(5000), round: None }
                 },
                 Event::Done { reason: Some("refusal".into()) },
             ]
         );
+        // No tool calls: no round
+        assert!(d.take_round().is_none());
+    }
+
+    #[test]
+    fn a_tool_call_is_sent_back_with_its_signed_thinking() {
+        let mut d = Decoder::default();
+        for line in [
+            r#"{"type":"message_start","message":{"usage":{"input_tokens":20}}}"#,
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Need the WEB."}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}"#,
+            r#"{"type":"content_block_stop","index":0}"#,
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#,
+            r#"{"type":"content_block_stop","index":1}"#,
+            r#"{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"read","input":{}}}"#,
+            r#"{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"references\":"}}"#,
+            r#"{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" \"John 3:16\", \"translations\": [\"web\"]}"}}"#,
+            r#"{"type":"content_block_stop","index":2}"#,
+            r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":30}}"#,
+        ] {
+            d.decode(line, &mut |_| {}).unwrap();
+        }
+        let (said, _, calls) = d.take_round().unwrap();
+        assert_eq!(calls, vec![ToolCall { id: "toolu_1".into(), name: "read".into(), arguments: json!({"references": "John 3:16", "translations": ["web"]}) }]);
+        // The thinking, signed, and the call; not the empty text
+        assert_eq!(
+            said,
+            json!({"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "Need the WEB.", "signature": "sig"},
+                {"type": "tool_use", "id": "toolu_1", "name": "read", "input": {"references": "John 3:16", "translations": ["web"]}},
+            ]})
+        );
+
+        let req = ChatRequest {
+            endpoint: Endpoint { kind: crate::Kind::Anthropic, base_url: "https://api.anthropic.com/v1".into(), api_key: None },
+            model: "m".into(),
+            instructions: "i".into(),
+            context: String::new(),
+            messages: vec![crate::Message { role: Role::User, content: "How does the WEB word John 3:16?".into() }],
+            max_tokens: None,
+            effort: None,
+            thinking: true,
+            enable_thinking: None,
+            tools: vec![Tool { name: "read", description: "Read".into(), parameters: json!({"type": "object"}) }],
+            plain_instructions: None,
+            context_window: None,
+            rounds: vec![Round { said: said.clone(), reasoning: String::new(), calls, results: vec!["For God so loved".into()] }],
+            no_more_tools: true,
+        };
+        let built = request(&reqwest::Client::new(), &req).build().unwrap();
+        let b: Value = serde_json::from_slice(built.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(b["messages"][1], said);
+        assert_eq!(
+            b["messages"][2],
+            json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "For God so loved", "cache_control": {"type": "ephemeral"}}]})
+        );
+        assert_eq!(b["tools"][0]["input_schema"], json!({"type": "object"}));
+        assert_eq!(b["tool_choice"], json!({"type": "none"}));
     }
 
     #[test]

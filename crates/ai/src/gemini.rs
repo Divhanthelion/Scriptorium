@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::{ChatRequest, Endpoint, Event, ModelInfo, Role, Usage, url};
+use crate::{ChatRequest, Endpoint, Event, ModelInfo, Role, ToolCall, Usage, url};
 
 pub fn request(client: &reqwest::Client, req: &ChatRequest) -> reqwest::RequestBuilder {
     let mut system = req.instructions.clone();
@@ -10,7 +10,7 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest) -> reqwest::RequestB
         system.push_str("\n\n");
         system.push_str(&req.context);
     }
-    let contents: Vec<Value> = req
+    let mut contents: Vec<Value> = req
         .messages
         .iter()
         .map(|m| {
@@ -20,6 +20,25 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest) -> reqwest::RequestB
             })
         })
         .collect();
+    // This answer's lookups: the model's parts as they came (their thought signatures
+    // with them), then what each call got
+    for round in &req.rounds {
+        contents.push(round.said.clone());
+        let parts: Vec<Value> = round
+            .calls
+            .iter()
+            .zip(&round.results)
+            .map(|(call, result)| {
+                let mut response = json!({"name": call.name, "response": {"content": result}});
+                // (The model's own id, where it gave one: not one made up here, "#0")
+                if !call.id.is_empty() && !call.id.starts_with('#') {
+                    response["id"] = json!(call.id);
+                }
+                json!({"functionResponse": response})
+            })
+            .collect();
+        contents.push(json!({"role": "user", "parts": parts}));
+    }
     let mut config = json!({});
     if let Some(max) = req.max_tokens {
         config["maxOutputTokens"] = json!(max);
@@ -27,11 +46,19 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest) -> reqwest::RequestB
     if req.thinking {
         config["thinkingConfig"] = json!({"includeThoughts": true});
     }
-    let body = json!({
+    let mut body = json!({
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": contents,
         "generationConfig": config,
     });
+    if !req.tools.is_empty() {
+        let declarations: Vec<Value> =
+            req.tools.iter().map(|t| json!({"name": t.name, "description": t.description, "parameters": t.parameters})).collect();
+        body["tools"] = json!([{"functionDeclarations": declarations}]);
+        if req.no_more_tools {
+            body["toolConfig"] = json!({"functionCallingConfig": {"mode": "NONE"}});
+        }
+    }
     let model = req.model.trim_start_matches("models/");
     key(client.post(url(&req.endpoint.base_url, &format!("models/{}:streamGenerateContent?alt=sse", model))), &req.endpoint)
         .json(&body)
@@ -73,6 +100,10 @@ pub fn parse_models(json: &Value) -> Vec<ModelInfo> {
 #[derive(Default)]
 pub struct Decoder {
     reason: Option<String>,
+    /// The reply's parts as they came (text, thoughts, function calls, and the
+    /// signatures on them), to send back when it calls functions
+    parts: Vec<Value>,
+    calls: Vec<ToolCall>,
 }
 
 impl crate::Decoder for Decoder {
@@ -88,6 +119,17 @@ impl crate::Decoder for Decoder {
         }
         if let Some(candidate) = chunk.pointer("/candidates/0") {
             for part in candidate.pointer("/content/parts").and_then(Value::as_array).into_iter().flatten() {
+                if part.as_object().is_some_and(|o| !o.is_empty()) && self.parts.len() < 10_000 {
+                    self.parts.push(part.clone());
+                }
+                if let Some(call) = part.get("functionCall") {
+                    self.calls.push(ToolCall {
+                        id: call.get("id").and_then(Value::as_str).map_or_else(|| format!("#{}", self.calls.len()), str::to_string),
+                        name: call.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+                        arguments: call.get("args").cloned().unwrap_or(json!({})),
+                    });
+                    continue;
+                }
                 let Some(text) = part.get("text").and_then(Value::as_str).filter(|t| !t.is_empty()) else {
                     continue;
                 };
@@ -117,6 +159,7 @@ impl crate::Decoder for Decoder {
                         (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
                     },
                     cached_tokens: n("cachedContentTokenCount"),
+                    round: None,
                 },
             });
         }
@@ -128,12 +171,21 @@ impl crate::Decoder for Decoder {
             emit(Event::Done { reason: Some(reason) });
         }
     }
+
+    fn take_round(&mut self) -> Option<(Value, String, Vec<ToolCall>)> {
+        let calls = std::mem::take(&mut self.calls);
+        let parts = std::mem::take(&mut self.parts);
+        if calls.is_empty() {
+            return None;
+        }
+        Some((json!({"role": "model", "parts": parts}), String::new(), calls))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Decoder as _;
+    use crate::{Decoder as _, Round, Tool};
 
     #[test]
     fn streams_thoughts_text_and_finish() {
@@ -151,10 +203,49 @@ mod tests {
             vec![
                 Event::Reasoning { text: "Weighing it.".into() },
                 Event::Text { text: "Selah.".into() },
-                Event::Usage { usage: Usage { input_tokens: Some(50), output_tokens: Some(13), cached_tokens: None } },
+                Event::Usage { usage: Usage { input_tokens: Some(50), output_tokens: Some(13), cached_tokens: None, round: None } },
                 Event::Done { reason: Some("stop".into()) },
             ]
         );
+        assert!(d.take_round().is_none());
+    }
+
+    #[test]
+    fn a_function_call_is_sent_back_with_its_signature() {
+        let mut d = Decoder::default();
+        for line in [
+            r#"{"candidates":[{"content":{"parts":[{"text":"Looking it up.","thought":true}],"role":"model"}}]}"#,
+            r#"{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{"references":"John 3:16","translations":["web"]}},"thoughtSignature":"sig"}],"role":"model"},"finishReason":"STOP"}]}"#,
+        ] {
+            d.decode(line, &mut |_| {}).unwrap();
+        }
+        let (said, _, calls) = d.take_round().unwrap();
+        assert_eq!(calls[0].name, "read");
+        assert_eq!(calls[0].arguments, json!({"references": "John 3:16", "translations": ["web"]}));
+        assert_eq!(said["parts"][1]["thoughtSignature"], json!("sig"));
+
+        let req = ChatRequest {
+            endpoint: Endpoint { kind: crate::Kind::Gemini, base_url: "https://generativelanguage.googleapis.com/v1beta".into(), api_key: None },
+            model: "gemini-3-pro".into(),
+            instructions: "i".into(),
+            context: String::new(),
+            messages: vec![crate::Message { role: Role::User, content: "How does the WEB word John 3:16?".into() }],
+            max_tokens: None,
+            effort: None,
+            thinking: false,
+            enable_thinking: None,
+            tools: vec![Tool { name: "read", description: "Read".into(), parameters: json!({"type": "object"}) }],
+            plain_instructions: None,
+            context_window: None,
+            rounds: vec![Round { said: said.clone(), reasoning: String::new(), calls, results: vec!["For God so loved".into()] }],
+            no_more_tools: false,
+        };
+        let built = request(&reqwest::Client::new(), &req).build().unwrap();
+        let b: Value = serde_json::from_slice(built.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(b["contents"][1], said);
+        assert_eq!(b["contents"][2], json!({"role": "user", "parts": [{"functionResponse": {"name": "read", "response": {"content": "For God so loved"}}}]}));
+        assert_eq!(b["tools"][0]["functionDeclarations"][0]["name"], json!("read"));
+        assert!(b.get("toolConfig").is_none());
     }
 
     #[test]

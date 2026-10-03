@@ -2,9 +2,10 @@
 
 The assistant answers questions about what the reader attaches: passages in any of the
 library's translations, the Hebrew and Greek under the KJV, commentaries, and
-cross-references. The reader brings their own model: a key for Anthropic, OpenAI,
-Google, DeepSeek, OpenRouter, or Groq, or a server of their own. The app has no AI
-service and never sees the questions.
+cross-references. When a question needs more, it looks it up in the library itself (see
+"Looking things up" below). The reader brings their own model: a key for Anthropic,
+OpenAI, Google, DeepSeek, OpenRouter, or Groq, or a server of their own. The app has no
+AI service and never sees the questions.
 
 Each request is the instructions, then the context, then the conversation. The
 instructions come from `instructions()` in `crates/core/src/context.rs`, and the context
@@ -24,15 +25,51 @@ much is attached.
 - **Write references in full**, as Book chapter:verse (never "v. 37"), so the app can
   link them. Say whose numbering is used where translations differ.
 - **Say whose view a note gives**, rather than presenting it as settled.
-- **Say what isn't attached.** If the question needs a passage, translation, or
-  commentary that isn't there, the answer says so and points to "Change" above the
-  conversation. Wording from memory is called that, never presented as exact.
+- **Look up what isn't attached, rather than recall it.** The reader chose what to
+  attach, so the model answers from that where it can, and looks up only what the
+  question needs and the attached text lacks. With lookups off (or a server that
+  takes no tools), it says what isn't attached and points to "Change" above the
+  conversation, and calls wording from memory that, never presenting it as exact.
 - **Lead with the answer, then the evidence.** Keep it as short as the question allows.
   Separate what the text says from how it has been read, and present the traditions'
   readings fairly.
 
 The instructions name what is attached: each translation with its abbreviation and
 year, and each commentary with its author, date, and tradition.
+
+## Looking things up
+
+Unless the reader turns it off (Settings, AI assistant, "Let it look things up"), the
+model is given three tools (`crates/core/src/lookups.rs`), which name every translation,
+commentary, and cross-reference collection by id:
+
+- **read**: passages by reference ("John 3:16; Romans 5:8"), in any translations, with
+  any commentaries' notes, cross-references, and the Hebrew and Greek behind the KJV,
+  built by the same engine as attached text, in the same format;
+- **search**: where words occur in translations or commentaries, each verse's reference
+  and words or the words around the match in a note;
+- **lexicon**: whole lexicon entries by Strong's number.
+
+The app runs the lookup on the device and gives the model its text, and the model
+carries on. An answer can have six rounds of lookups at most, sixteen lookups in all.
+Each lookup gives at most 24,000 tokens, and never more than is left of the model's
+window after what was attached and the room kept for the answer. A lookup that doesn't
+fit is cut short and says so. When the limit is reached, the model is asked to answer
+with what it has.
+
+Each answer lists what was looked up ("Read John 3:16 · WEB · 82 tokens"), and the exact
+text is a click away while the answer is open. Saved conversations keep the list, not
+the text.
+
+Each provider is sent back exactly what it needs to carry on:
+- OpenAI-compatible services get the call and the tool results, and DeepSeek also gets
+  its reasoning within the answer.
+- Anthropic gets its signed thinking blocks unchanged.
+- Gemini gets its parts with their thought signatures.
+
+A server that takes no tools (Ollama with a model that has none, vLLM without a tool
+parser) is asked again without them, with the instructions for answering from what is
+attached.
 
 ## How it was tuned
 
@@ -69,6 +106,12 @@ hand.
 | Final instructions, Flash, no thinking | 4.8 s | 1.4 s | 466 words | 248 of 259 (96%) | 102 of 102 | $0.111 |
 | Second instructions, Flash, low effort | 9.9 s | 6.6 s | 475 words | 217 of 227 (96%) | 114 of 114 | $0.124 |
 | Second instructions, Pro, thinking | 33.9 s | 30.9 s | 264 words | 114 of 119 (96%) | 69 of 69 | $0.574 |
+| Looking things up, first wording | 22.8 s | 13.2 s | 663 words | 330 of 347 (95%) | 167 of 169 | $0.201 |
+| **Looking things up, final wording** | **17.4 s** | **10.8 s** | **518 words** | **291 of 304 (96%)** | **139 of 139** | **$0.159** |
+
+With lookups, quotations are checked against what was looked up as well as what was
+attached. The two references the first run "missed" were valid in the Douay-Rheims'
+numbering, which the model had looked up.
 
 Costs are at DeepSeek's off-peak prices; peak hours cost twice as much. Each cost is
 mostly the one 484,000-token question ($0.074). Its follow-up cost $0.0036, because
@@ -93,10 +136,24 @@ mostly the one 484,000-token question ($0.074). Its follow-up cost $0.0036, beca
   John 11:37 was quoted from memory without saying so.
 - **Pro.** As faithful as Flash with thinking, and more concise, but it takes 30 seconds
   before its first word and costs four times as much.
-- **Without the passage.** Answers to case 9 (nothing attached) and case 10 (another
-  translation) said their wording was from memory and how to attach the text. The
-  wording itself is sometimes wrong (the WEB's John 3:16 again). Attaching the text is
-  what makes it exact.
+- **Without the passage, before lookups.** Answers to case 9 (nothing attached) and
+  case 10 (another translation) said their wording was from memory and how to attach the
+  text. The wording itself was sometimes wrong (the WEB's John 3:16 again).
+- **Looking things up.** Case 10 now reads the WEB and quotes it exactly ("his only born
+  Son").
+
+  Case 9 now searches the KJV and ten other translations to show the saying isn't in
+  them. It also finds Matthew Henry's own "God will help those that help themselves" (on
+  Joshua 5:13–15) and says it is his maxim, not Scripture.
+
+  With the first wording the model read far more than it needed: 22,000 tokens of
+  commentaries on Malachi 4 for a question about its verse numbering, and nine
+  commentaries for a word study. Saying that the reader chose what to attach, and that
+  lookups are for what the question needs and the attached text lacks, brought answers
+  back to their length without lookups, at a little more time and cost.
+
+  What remains: for "why" questions the model may still read several commentaries, a
+  judgement the reader can steer by attaching the ones they want.
 
 ### What the app does with DeepSeek
 
@@ -108,12 +165,15 @@ mostly the one 484,000-token question ($0.074). Its follow-up cost $0.0036, beca
 - The app sends DeepSeek its own switches: `thinking` (enabled or disabled) and
   `reasoning_effort`. The reasoning streams in above the answer, under "Thinking…" and
   then "Reasoning".
+- **Looking things up is on by default.** DeepSeek V4 takes tools with thinking on, and
+  its prompt cache keeps lookups cheap: a second round re-reads the first from the
+  cache.
 
 ## Running it again
 
 ```bash
 cargo run --release -p kjv-devserver
-python tests/ai/assistant_eval.py run <provider-id> deepseek-flash runs/flash
+python tests/ai/assistant_eval.py run <provider-id> deepseek-flash runs/flash --lookups
 python tests/ai/assistant_eval.py misses runs/flash
 ```
 
@@ -123,9 +183,8 @@ Credential Manager, elsewhere in memory until the server stops.
 
 ## Not yet done
 
-- **Let the model look things up.** An answer about a passage that isn't attached can
-  only be from memory. A tool the model could call to fetch a passage, a note, or a
-  lexicon entry would make those answers exact too. That needs function calling, and
-  each provider does it differently.
+- **Lookups have been tested end to end only on DeepSeek.** Anthropic's and Gemini's
+  tool formats are covered by unit tests built from their documented streams, but not
+  yet by a live model.
 - **Concept words in quotation marks** still slip through now and then. They don't
   misquote anything, but they look like quotations.

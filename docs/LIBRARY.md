@@ -301,6 +301,13 @@ What the study assistant reads with each question is the reader's to choose
 - **Saved contexts** are named and used again. Each question keeps the context it was
   asked with (passages fixed where they were); reopening a conversation sends its
   follow-up questions with that context until a new conversation starts.
+- **Looking things up**: unless the reader turns it off, the model can also ask for
+  more while it answers (`crates/core/src/lookups.rs`): `read` gives any passages with
+  any translations, commentaries, cross-references, and Hebrew and Greek, built by this
+  same engine; `search` gives where words occur in translations or commentaries;
+  `lexicon` gives lexicon entries by Strong's number. Each fits the room left in the
+  model's window, and each answer lists what it read (see
+  [ASSISTANT.md](ASSISTANT.md)).
 
 Every other translation's text is found verse by verse through the verse alignment;
 commentaries and cross-references through the KJV's verses. A translation that leaves

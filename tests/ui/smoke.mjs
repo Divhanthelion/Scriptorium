@@ -443,7 +443,8 @@ await test("Chat asks consent, then streams an answer about the attached chapter
   await until(() => $(".chat-model")?.value.endsWith("mock-model"), "model list");
   // (Sized once the library is read: on a slow machine, after the models are listed)
   await until(() => $(".chat-scope-label").textContent === "Reads: John 11", "chapter attached: " + $(".chat-scope-label").textContent, 15000);
-  assert($(".chat-scope-size").textContent === "≈2k of 32k tokens", "budget: " + $(".chat-scope-size").textContent);
+  // (John 11, the instructions, and the definitions of the tools it can look things up with)
+  assert($(".chat-scope-size").textContent === "≈4k of 32k tokens", "budget: " + $(".chat-scope-size").textContent);
   await ask("Why did Jesus weep?");
   await until(() => !$(".chat-consent").hidden, "consent prompt");
   assert($(".chat-consent").textContent.includes("127.0.0.1:8765"), "consent names the server");
@@ -490,6 +491,43 @@ await test("Chat: Stop, errors, and a scope too large for the model", "book=John
   assert($$(".msg").length === before, "nothing sent when it can't fit");
   assert($("#context-editor").open, "the editor opens to make room");
   $("#context-editor").close();
+`);
+await aiSettings({ consent: { mock: true } });
+await test("Chat: the assistant looks up what isn't attached, and shows what it read", "book=John&chapter=11", {}, `${CHAT_HELPERS}
+  $('[data-open-panel="chat"]').click();
+  await until(() => $(".chat-model")?.value.endsWith("mock-model"), "model list");
+  await ask("Please look up how the WEB words John 3:16");
+  await until(() => finished() && lastAnswer().querySelector(".msg-tools"), "answer");
+  const items = [...lastAnswer().querySelectorAll(".msg-lookups .lookup")];
+  assert(items.length === 1, "one lookup: " + items.length);
+  assert(/^Read John 3:16 · WEB · [0-9]+ tokens$/.test(items[0].querySelector("summary").textContent), "what was read: " + items[0].textContent);
+  // Its exact text, on request
+  items[0].querySelector("summary").click();
+  assert(items[0].querySelector(".lookup-text").textContent.includes("16 For God so loved the world, that he gave his only born Son"), "the text it read");
+  // The answer quotes it; what the model wrote before looking up is a paragraph of its own
+  const paragraphs = [...lastAnswer().querySelectorAll(".msg-body p")].map((p) => p.textContent);
+  assert(paragraphs[0] === "Let me check the WEB.", "first paragraph: " + paragraphs[0]);
+  assert(paragraphs[1].startsWith("The WEB has: “For God so loved the world, that he gave his only born Son"), "the answer: " + paragraphs[1]);
+  // Both requests' tokens, added up
+  assert(lastAnswer().querySelector(".msg-usage").textContent.startsWith("6k in · 70 out"), "usage: " + lastAnswer().querySelector(".msg-usage").textContent);
+  // Saved with what was looked up (not its text)
+  await wait(300);
+  const saved = (await (await fetch("/api/conversations_list", { method: "POST", body: "{}" })).json())[0];
+  const c = await (await fetch("/api/conversation_load", { method: "POST", body: JSON.stringify({ id: saved.id }) })).json();
+  const l = c.messages.at(-1).lookups[0];
+  assert(l.label === "John 3:16 · WEB" && l.tool === "read" && !("text" in l), "saved: " + JSON.stringify(l));
+  // Turned off, nothing is looked up
+  $('[data-open-panel="settings"]').click();
+  const toggle = await until(() => $('[aria-labelledby="set-lookups"]'), "the switch");
+  assert(toggle.getAttribute("aria-checked") === "true", "on by default");
+  toggle.click();
+  await until(() => $('[aria-labelledby="set-lookups"]').getAttribute("aria-checked") === "false", "off");
+  $('[data-open-panel="chat"]').click();
+  await until(() => $(".chat-model")?.value.endsWith("mock-model"), "model list again");
+  await ask("Now look up Romans 5:8 too");
+  await until(() => finished() && $$(".msg.assistant").length === 2 && lastAnswer().querySelector(".msg-tools"), "second answer");
+  assert(lastAnswer().querySelector(".msg-lookups").hidden, "nothing looked up");
+  assert(lastAnswer().querySelector(".msg-body").textContent.startsWith("You attached"), "answered from what was attached");
 `);
 await aiSettings({ consent: { mock: true }, context: { passages: [{ follow: "verse" }], translations: ["reading"] } });
 await test("Chat: choose passages, translations, commentaries, and cross-references, and see what is sent", "book=John&chapter=11&verse=35", {}, `${CHAT_HELPERS}

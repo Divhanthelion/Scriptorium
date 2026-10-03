@@ -14,12 +14,13 @@ of what's left after tuning is phrases used as terms in quotation marks, or noth
 (punctuation an answer normalised).
 
     cargo run --release -p kjv-devserver                 (serves http://127.0.0.1:1420)
-    python tests/ai/assistant_eval.py run <provider-id> <model> <out-dir> [--thinking on|off] [--effort low|high|max] [--only name,name]
+    python tests/ai/assistant_eval.py run <provider-id> <model> <out-dir> [--thinking on|off] [--effort low|high|max] [--lookups] [--only name,name]
     python tests/ai/assistant_eval.py score <out-dir>
     python tests/ai/assistant_eval.py misses <out-dir> [name,name]
 
-The provider id is the one the dev server's AI settings gave the provider (in its
-settings file). See docs/ASSISTANT.md for the cases, the results, and what was changed.
+The provider id is the one the dev server's AI settings gave the provider. With
+--lookups the model may look things up itself (read, search, lexicon): what it looked
+up is kept with each answer, and its quotations are checked against that too. See docs/ASSISTANT.md for the cases, the results, and what was changed.
 """
 import difflib
 import json
@@ -148,7 +149,7 @@ def check_refs(answer, bibles=("kjv",), context=""):
     return seen
 
 
-def run_case(case, provider, model, thinking, effort, max_tokens):
+def run_case(case, provider, model, thinking, effort, max_tokens, lookups=False):
     spec = case.get("context", {"passages": []})
     ctx = call("context_text", {"context": spec})
     messages = []
@@ -168,9 +169,13 @@ def run_case(case, provider, model, thinking, effort, max_tokens):
             args["enableThinking"] = thinking
         if effort:
             args["effort"] = effort
+        if lookups:
+            args["lookups"] = True
+            args["contextWindow"] = 1048576
         started = time.time()
         first_text = None
         text, reasoning, usage, reason, error = "", "", None, None, None
+        found = []
         with post("ai_chat", {"id": f"eval-{time.time_ns()}", "args": args}, timeout=900) as r:
             for line in r:
                 if not line.strip():
@@ -184,7 +189,17 @@ def run_case(case, provider, model, thinking, effort, max_tokens):
                 elif t == "reasoning":
                     reasoning += ev["text"]
                 elif t == "usage":
-                    usage = ev["usage"]
+                    # Each round of looking up is a request of its own: their tokens add up
+                    u = ev["usage"]
+                    if usage and u.get("round"):
+                        usage = {k: (usage.get(k) or 0) + (u.get(k) or 0) for k in ("inputTokens", "outputTokens", "cachedTokens")}
+                    else:
+                        usage = u
+                elif t == "lookup":
+                    found.append({"tool": ev["tool"], "label": ev["label"], "tokens": ev["tokens"], "failed": ev["failed"], "text": ev["text"]})
+                    # What it wrote before looking up ends there, as the app shows it
+                    if text.strip() and not text.endswith("\n\n"):
+                        text = text.rstrip() + "\n\n"
                 elif t == "done":
                     reason = ev.get("reason")
                 elif t == "error":
@@ -206,6 +221,7 @@ def run_case(case, provider, model, thinking, effort, max_tokens):
             "first_text": round(first_text or 0, 2),
             "cost": cost,
             "answer_words": len(text.split()),
+            "lookups": found,
         })
         messages.append({"role": "assistant", "content": text})
     return {"name": case["name"], "label": ctx["label"], "context_tokens": ctx["tokens"], "turns": turns}
@@ -215,6 +231,7 @@ def run(argv):
     provider, model, out_dir = argv[:3]
     opts = argv[3:]
     thinking, effort, only, max_tokens = None, None, None, 16000
+    lookups = "--lookups" in opts
     for i, o in enumerate(opts):
         if o == "--thinking":
             thinking = opts[i + 1] == "on"
@@ -229,11 +246,13 @@ def run(argv):
     for case in json.loads(CASES.read_text(encoding="utf-8")):
         if only and case["name"] not in only:
             continue
-        result = run_case(case, provider, model, thinking, effort, max_tokens)
+        result = run_case(case, provider, model, thinking, effort, max_tokens, lookups)
         (out / f"{case['name']}.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
         for t in result["turns"]:
             u = t["usage"] or {}
             print(f"{case['name']:30} {t['seconds']:6.1f}s first words {t['first_text']:5.1f}s in {u.get('inputTokens')} (cached {u.get('cachedTokens')}) out {u.get('outputTokens')} ${t['cost'] or 0:.4f} {t['reason']}{' ERROR ' + t['error'] if t['error'] else ''}", flush=True)
+            for f in t["lookups"]:
+                print(f"    looked up ({f['tool']}): {f['label']} · {f['tokens']} tokens{' FAILED: ' + f['text'][:120] if f['failed'] else ''}", flush=True)
     score([out_dir])
 
 
@@ -248,8 +267,9 @@ def score(argv):
             continue
         ctx = call("context_text", {"context": case["context"]})["text"]
         for t in r["turns"]:
-            quotes = check_quotes(t["answer"], ctx)
-            refs = check_refs(t["answer"], case["context"].get("translations", []), ctx)
+            seen = ctx + "".join("\n" + f["text"] for f in t.get("lookups", []))
+            quotes = check_quotes(t["answer"], seen)
+            refs = check_refs(t["answer"], case["context"].get("translations", []), seen)
             bad_q = [q for q in quotes if not q["found"] and not q["from_memory_said"]]
             bad_r = [x for x in refs if not x["ok"]]
             totals["turns"] += 1
@@ -258,7 +278,7 @@ def score(argv):
             totals["quotes"] += len(quotes)
             totals["quotes_ok"] += len(quotes) - len(bad_q)
             # Quotations of what is attached (not the cases that attach nothing, or not the passage asked about)
-            if not case.get("unattached"):
+            if not case.get("unattached") or t.get("lookups"):
                 totals["attached"] += len(quotes)
                 totals["attached_ok"] += sum(q["found"] for q in quotes)
             totals["refs"] += len(refs)
@@ -291,7 +311,9 @@ def misses(argv):
         words = re.findall(r"\S+", ctx)
         for t in r["turns"]:
             a = t["answer"]
-            for q in check_quotes(a, ctx):
+            seen = ctx + "".join("\n" + f["text"] for f in t.get("lookups", []))
+            words = re.findall(r"\S+", seen)
+            for q in check_quotes(a, seen):
                 if q["found"]:
                     continue
                 qw = q["quote"].split()

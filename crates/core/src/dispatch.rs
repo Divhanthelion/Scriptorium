@@ -35,6 +35,9 @@ struct StrongsArgs {
 #[derive(Deserialize)]
 struct ContextArgs {
     context: context::Spec,
+    /// The assistant may look things up (other instructions, and tools' definitions)
+    #[serde(default)]
+    lookups: bool,
 }
 
 #[derive(Deserialize)]
@@ -141,13 +144,14 @@ pub fn dispatch_all(
         }
         "context_size" => {
             let a: ContextArgs = parse(name, args)?;
-            to_json(context::size(data, library, &a.context)?)
+            to_json(context::size_with(data, library, &a.context, a.lookups)?)
         }
         "context_text" => {
             let a: ContextArgs = parse(name, args)?;
             let built = context::build(data, library, &a.context, None)?;
-            let instructions = context::instructions(library, &built);
-            let tokens = context::estimate_tokens(&instructions) + built.tokens;
+            let instructions = context::instructions_with(library, &built, a.lookups);
+            let tools = if a.lookups { crate::lookups::tools_tokens(library) } else { 0 };
+            let tokens = context::estimate_tokens(&instructions) + tools + built.tokens;
             to_json(ContextText { label: built.label, instructions, text: built.text, tokens })
         }
         "context_parse" => {

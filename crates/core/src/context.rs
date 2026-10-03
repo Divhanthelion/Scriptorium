@@ -178,8 +178,15 @@ pub fn build(data: &DataBundle, lib: &Library, spec: &Spec, cap: Option<usize>) 
 }
 
 pub fn size(data: &DataBundle, lib: &Library, spec: &Spec) -> Result<Size, String> {
+    size_with(data, lib, spec, false)
+}
+
+/// The size of the context for `spec`, with the instructions as they are when the
+/// assistant may look things up (`lookups`), the tools' definitions counted with them.
+pub fn size_with(data: &DataBundle, lib: &Library, spec: &Spec, lookups: bool) -> Result<Size, String> {
     let c = build(data, lib, spec, Some(SIZE_CAP))?;
-    let instructions = estimate_tokens(&instructions(lib, &c));
+    let tools = if lookups { crate::lookups::tools_tokens(lib) } else { 0 };
+    let instructions = estimate_tokens(&instructions_with(lib, &c, lookups)) + tools;
     Ok(Size { label: c.label, verses: c.verses, tokens: c.tokens, instructions, capped: c.capped, passages: c.passages })
 }
 
@@ -1000,23 +1007,11 @@ impl<'a> Builder<'a> {
     fn definitions(&mut self) {
         self.attached.definitions = true;
         self.text.push_str("<definitions>\n");
-        let data: &'a DataBundle = self.data;
         for key in self.strongs.clone() {
-            let Some(e) = data.extended.get_lexicon_entry(key) else {
+            let Some(entry) = lexicon_entry(self.data, key) else {
                 continue;
             };
-            let head: Vec<&str> = [e.original_word.trim(), e.transliteration.trim(), e.morph.trim(), e.gloss.trim()]
-                .into_iter()
-                .filter(|x| !x.is_empty())
-                .collect();
-            self.text.push_str(&format!("## {} {}\n", strongs_display(key), head.join(" · ")));
-            for line in e.definition.lines() {
-                let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
-                if !line.is_empty() {
-                    self.text.push_str(&line);
-                    self.text.push('\n');
-                }
-            }
+            self.text.push_str(&entry);
             if self.full() {
                 break;
             }
@@ -1043,13 +1038,35 @@ struct Places {
 /// translation that isn't attached named as such, with how to attach it, rather than
 /// quoted from memory.
 pub fn instructions(lib: &Library, built: &Built) -> String {
+    instructions_with(lib, built, false)
+}
+
+/// The instructions when the model can look things up for itself (`lookups`, the
+/// tools in [`crate::lookups`]): what isn't attached is looked up, not recalled.
+pub fn instructions_with(lib: &Library, built: &Built, lookups: bool) -> String {
     let a = &built.attached;
     let mut s = String::from(
         "You are the study assistant in Scriptorium, a Bible study library: many English translations \
          (among them the King James Version, 1769 Oxford text, with its Hebrew, Aramaic, and Greek), \
          commentaries, and cross-references.\n\n",
     );
-    if built.text.is_empty() {
+    if built.text.is_empty() && lookups {
+        s.push_str(
+            "No passage is attached to this conversation. Look up what the question needs (read, search, \
+             lexicon) rather than quoting from memory: what you look up is the library's text, word for word. \
+             Read commentaries when the question is about how a passage has been understood, or names a \
+             commentator.\n\n\
+             Using what you look up:\n\
+             - Quote exactly. Anything in quotation marks must be word for word as you looked it up: mark \
+             anything you leave out, however short, with an ellipsis (…) and any word you change with [square \
+             brackets]. Never put quotation marks around a paraphrase, a summary, or words of your own.\n\
+             - Give each quotation its source: Scripture by its reference and translation, a note by its \
+             commentator. Say whose view a note gives rather than presenting it as settled fact.\n\
+             - Write references in full, as Book chapter:verse (John 11:37, Romans 4:23-24), never \"v. 37\", \
+             so the reader can open them.\n\
+             - Look up only what the question needs.\n\n",
+        );
+    } else if built.text.is_empty() {
         s.push_str(
             "No passage is attached to this conversation. Answer from your knowledge of the Bible, and give \
              references (Book chapter:verse) the reader can check. Wording you give from memory may not be \
@@ -1109,9 +1126,9 @@ pub fn instructions(lib: &Library, built: &Built) -> String {
                  meaning, and say which sense you think fits a verse and why.\n",
             );
         }
+        s.push_str(if lookups { "\nUsing what is attached, and what you look up:\n" } else { "\nUsing what is attached:\n" });
         s.push_str(
-            "\nUsing what is attached:\n\
-             - Quote exactly. Anything in quotation marks must be word for word as it stands in the attached \
+            "- Quote exactly. Anything in quotation marks must be word for word as it stands in the attached \
              text, whether Scripture, a note, or a lexicon entry: mark anything you leave out, however short, \
              with an ellipsis (…) and any word you change with [square brackets]. Never put quotation marks \
              around a paraphrase, a summary, or words of your own.\n\
@@ -1127,12 +1144,18 @@ pub fn instructions(lib: &Library, built: &Built) -> String {
                  and where each commentary was written.\n",
             );
         }
-        s.push_str(
+        s.push_str(if lookups {
+            "- The reader chose what to attach: answer from it where it answers the question. Look something up \
+             (read, search, lexicon) only for what the question needs and the attached text lacks: a passage, \
+             translation, or commentator it asks about, a word's lexicon entry, or wording you would otherwise \
+             give from memory. Don't read commentaries the question doesn't call for. Use what you look up as you \
+             would the attached text.\n\n"
+        } else {
             "- If the question needs a passage, translation, or commentary that isn't attached, say so, and that \
              the reader can attach it with \"Change\" above the conversation to get its exact words. You may \
              still draw on your knowledge of the Bible, but say what you cite from memory, and never present \
-             remembered wording as exact.\n\n",
-        );
+             remembered wording as exact.\n\n"
+        });
     }
     s.push_str(
         "Guidelines:\n\
@@ -1147,6 +1170,23 @@ pub fn instructions(lib: &Library, built: &Built) -> String {
          - If you are unsure of a fact, a date, or a reference, say so.",
     );
     s
+}
+
+/// The full lexicon entry for Strong's number `key` ("G0026"), as the context gives
+/// it: "## G26 ἀγάπη · agapē · … · love", then its definition line by line.
+pub fn lexicon_entry(data: &DataBundle, key: &str) -> Option<String> {
+    let e = data.extended.get_lexicon_entry(key)?;
+    let head: Vec<&str> =
+        [e.original_word.trim(), e.transliteration.trim(), e.morph.trim(), e.gloss.trim()].into_iter().filter(|x| !x.is_empty()).collect();
+    let mut out = format!("## {} {}\n", strongs_display(key), head.join(" · "));
+    for line in e.definition.lines() {
+        let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !line.is_empty() {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    Some(out)
 }
 
 /// "A", "A and B", "A, B, and C"

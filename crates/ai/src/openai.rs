@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 
 use crate::think::ThinkSplitter;
-use crate::{ChatRequest, Endpoint, Event, ModelInfo, Role, Usage, url};
+use crate::{ChatRequest, Endpoint, Event, ModelInfo, Role, ToolCall, Usage, url};
 
 pub fn request(client: &reqwest::Client, req: &ChatRequest, usage_option: bool) -> reqwest::RequestBuilder {
     let mut system = req.instructions.clone();
@@ -20,9 +20,32 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest, usage_option: bool) 
             "content": m.content,
         })
     }));
+    // This answer's lookups: what the model asked for, and what it got
+    for round in &req.rounds {
+        let mut said = round.said.clone();
+        // DeepSeek carries its reasoning on through the lookups of one answer
+        if is_deepseek(&req.endpoint.base_url) && !round.reasoning.is_empty() {
+            said["reasoning_content"] = json!(round.reasoning);
+        }
+        messages.push(said);
+        for (call, result) in round.calls.iter().zip(&round.results) {
+            messages.push(json!({"role": "tool", "tool_call_id": call.id, "content": result}));
+        }
+    }
     let mut body = json!({"model": req.model, "messages": messages, "stream": true});
     if usage_option {
         body["stream_options"] = json!({"include_usage": true});
+    }
+    if !req.tools.is_empty() {
+        let tools: Vec<Value> = req
+            .tools
+            .iter()
+            .map(|t| json!({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}))
+            .collect();
+        body["tools"] = json!(tools);
+        if req.no_more_tools {
+            body["tool_choice"] = json!("none");
+        }
     }
     if let Some(max) = req.max_tokens {
         body["max_tokens"] = json!(max);
@@ -91,6 +114,22 @@ pub fn parse_models(json: &Value) -> Vec<ModelInfo> {
 pub struct Decoder {
     think: ThinkSplitter,
     reason: Option<String>,
+    /// The reply as it came, to send back with its tool calls: its text, its reasoning,
+    /// and each call's id, name, and arguments (streamed in pieces, by index)
+    text: String,
+    reasoning: String,
+    calls: Vec<(String, String, String)>,
+}
+
+impl Decoder {
+    fn emit_text(&mut self, reasoning: bool, text: String, emit: &mut dyn FnMut(Event)) {
+        if reasoning {
+            emit(Event::Reasoning { text });
+        } else {
+            self.text.push_str(&text);
+            emit(Event::Text { text });
+        }
+    }
 }
 
 impl crate::Decoder for Decoder {
@@ -111,13 +150,34 @@ impl crate::Decoder for Decoder {
             // `reasoning_content` (DeepSeek, vLLM) or `reasoning` (OpenRouter, newer vLLM)
             for key in ["reasoning_content", "reasoning"] {
                 if let Some(text) = delta.get(key).and_then(Value::as_str).filter(|t| !t.is_empty()) {
+                    self.reasoning.push_str(text);
                     emit(Event::Reasoning { text: text.to_string() });
                     break;
                 }
             }
             if let Some(text) = delta.get("content").and_then(Value::as_str) {
                 for (reasoning, text) in self.think.push(text) {
-                    emit(if reasoning { Event::Reasoning { text } } else { Event::Text { text } });
+                    self.emit_text(reasoning, text, emit);
+                }
+            }
+            // A tool call comes in pieces: its id and name first, then its arguments
+            for piece in delta.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
+                let index = piece.get("index").and_then(Value::as_u64).map_or(self.calls.len(), |i| i as usize);
+                if index > 64 {
+                    continue;
+                }
+                while self.calls.len() <= index {
+                    self.calls.push(Default::default());
+                }
+                let call = &mut self.calls[index];
+                if let Some(id) = piece.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    call.0 = id.to_string();
+                }
+                if let Some(name) = piece.pointer("/function/name").and_then(Value::as_str) {
+                    call.1.push_str(name);
+                }
+                if let Some(args) = piece.pointer("/function/arguments").and_then(Value::as_str) {
+                    call.2.push_str(args);
                 }
             }
             if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
@@ -138,6 +198,7 @@ impl crate::Decoder for Decoder {
                         .pointer("/prompt_tokens_details/cached_tokens")
                         .or_else(|| u.get("prompt_cache_hit_tokens"))
                         .and_then(Value::as_u64),
+                    round: None,
                 },
             });
         }
@@ -146,31 +207,74 @@ impl crate::Decoder for Decoder {
 
     fn flush(&mut self, emit: &mut dyn FnMut(Event)) {
         for (reasoning, text) in self.think.finish() {
-            emit(if reasoning { Event::Reasoning { text } } else { Event::Text { text } });
+            self.emit_text(reasoning, text, emit);
         }
+    }
+
+    fn take_round(&mut self) -> Option<(Value, String, Vec<ToolCall>)> {
+        let calls: Vec<(String, String, String)> = std::mem::take(&mut self.calls).into_iter().filter(|c| !c.1.is_empty()).collect();
+        if calls.is_empty() {
+            return None;
+        }
+        // (A server that gives no ids gets ones of our own: each result must name its call)
+        let calls: Vec<ToolCall> = calls
+            .into_iter()
+            .enumerate()
+            .map(|(i, (id, name, args))| ToolCall {
+                id: if id.is_empty() { format!("call_{}", i) } else { id },
+                name,
+                arguments: serde_json::from_str(if args.trim().is_empty() { "{}" } else { &args }).unwrap_or(Value::Null),
+            })
+            .collect();
+        let tool_calls: Vec<Value> = calls
+            .iter()
+            .map(|c| json!({"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments.to_string()}}))
+            .collect();
+        let text = std::mem::take(&mut self.text);
+        let said = json!({
+            "role": "assistant",
+            "content": if text.is_empty() { Value::Null } else { json!(text) },
+            "tool_calls": tool_calls,
+        });
+        Some((said, std::mem::take(&mut self.reasoning), calls))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Decoder as _;
+    use crate::{Decoder as _, Round, Tool};
 
-    /// The JSON body `request` sends for `base_url` with thinking and effort set
-    fn body(base_url: &str, thinking: Option<bool>, effort: Option<&str>) -> Value {
-        let req = ChatRequest {
+    fn request_for(base_url: &str) -> ChatRequest {
+        ChatRequest {
             endpoint: Endpoint { kind: crate::Kind::OpenAi, base_url: base_url.into(), api_key: None },
             model: "m".into(),
             instructions: "i".into(),
             context: String::new(),
             messages: Vec::new(),
             max_tokens: Some(100),
-            effort: effort.map(String::from),
+            effort: None,
             thinking: false,
-            enable_thinking: thinking,
-        };
-        let built = request(&reqwest::Client::new(), &req, true).build().unwrap();
+            enable_thinking: None,
+            tools: Vec::new(),
+            plain_instructions: None,
+            context_window: None,
+            rounds: Vec::new(),
+            no_more_tools: false,
+        }
+    }
+
+    fn body_of(req: &ChatRequest) -> Value {
+        let built = request(&reqwest::Client::new(), req, true).build().unwrap();
         serde_json::from_slice(built.body().unwrap().as_bytes().unwrap()).unwrap()
+    }
+
+    /// The JSON body `request` sends for `base_url` with thinking and effort set
+    fn body(base_url: &str, thinking: Option<bool>, effort: Option<&str>) -> Value {
+        let mut req = request_for(base_url);
+        req.enable_thinking = thinking;
+        req.effort = effort.map(String::from);
+        body_of(&req)
     }
 
     #[test]
@@ -191,8 +295,7 @@ mod tests {
         assert!(local.get("thinking").is_none() && local.get("reasoning_effort").is_none());
     }
 
-    fn decode(lines: &[&str]) -> Vec<Event> {
-        let mut d = Decoder::default();
+    fn decode(d: &mut Decoder, lines: &[&str]) -> Vec<Event> {
         let mut events = Vec::new();
         for l in lines {
             d.decode(l, &mut |e| events.push(e)).unwrap();
@@ -202,13 +305,16 @@ mod tests {
 
     #[test]
     fn streams_reasoning_text_usage_and_finish() {
-        let events = decode(&[
-            r#"{"choices":[{"delta":{"role":"assistant","reasoning_content":"Hmm."}}]}"#,
-            r#"{"choices":[{"delta":{"content":"Jesus "}}]}"#,
-            r#"{"choices":[{"delta":{"content":"wept."},"finish_reason":"stop"}]}"#,
-            r#"{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":100}}}"#,
-            "[DONE]",
-        ]);
+        let events = decode(
+            &mut Decoder::default(),
+            &[
+                r#"{"choices":[{"delta":{"role":"assistant","reasoning_content":"Hmm."}}]}"#,
+                r#"{"choices":[{"delta":{"content":"Jesus "}}]}"#,
+                r#"{"choices":[{"delta":{"content":"wept."},"finish_reason":"stop"}]}"#,
+                r#"{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":100}}}"#,
+                "[DONE]",
+            ],
+        );
         assert_eq!(
             events,
             vec![
@@ -216,11 +322,56 @@ mod tests {
                 Event::Text { text: "Jesus ".into() },
                 Event::Text { text: "wept.".into() },
                 Event::Usage {
-                    usage: Usage { input_tokens: Some(120), output_tokens: Some(9), cached_tokens: Some(100) }
+                    usage: Usage { input_tokens: Some(120), output_tokens: Some(9), cached_tokens: Some(100), round: None }
                 },
                 Event::Done { reason: Some("stop".into()) },
             ]
         );
+    }
+
+    #[test]
+    fn tool_calls_are_gathered_from_their_pieces_and_sent_back() {
+        let mut d = Decoder::default();
+        decode(
+            &mut d,
+            &[
+                r#"{"choices":[{"delta":{"reasoning_content":"The WEB isn't attached."}}]}"#,
+                r#"{"choices":[{"delta":{"content":"Let me look."}}]}"#,
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":""}}]}}]}"#,
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"references\": \"John"}}]}}]}"#,
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" 3:16\"}"}}]}}]}"#,
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","function":{"name":"lexicon","arguments":"{\"strongs\":[\"G26\"]}"}}]},"finish_reason":"tool_calls"}]}"#,
+                "[DONE]",
+            ],
+        );
+        let (said, reasoning, calls) = d.take_round().unwrap();
+        assert_eq!(reasoning, "The WEB isn't attached.");
+        assert_eq!(calls.len(), 2);
+        assert_eq!((calls[0].id.as_str(), calls[0].name.as_str()), ("call_a", "read"));
+        assert_eq!(calls[0].arguments, json!({"references": "John 3:16"}));
+        assert_eq!(calls[1].arguments, json!({"strongs": ["G26"]}));
+        assert_eq!(said["content"], json!("Let me look."));
+        assert_eq!(said["tool_calls"][0]["function"]["name"], json!("read"));
+        // A reply without calls has no round
+        assert!(d.take_round().is_none());
+
+        // Sent back: the call, its result, the tools, and DeepSeek's reasoning
+        let mut req = request_for("https://api.deepseek.com/v1");
+        req.tools = vec![Tool { name: "read", description: "Read".into(), parameters: json!({"type": "object"}) }];
+        req.rounds = vec![Round { said, reasoning, calls: calls[..1].to_vec(), results: vec!["For God so loved".into()] }];
+        let b = body_of(&req);
+        let m = b["messages"].as_array().unwrap();
+        assert_eq!(m[1]["tool_calls"][0]["id"], json!("call_a"));
+        assert_eq!(m[1]["reasoning_content"], json!("The WEB isn't attached."));
+        assert_eq!(m[2], json!({"role": "tool", "tool_call_id": "call_a", "content": "For God so loved"}));
+        assert_eq!(b["tools"][0]["function"]["name"], json!("read"));
+        assert!(b.get("tool_choice").is_none());
+        // Elsewhere the reasoning isn't sent back; and when nothing more may be looked up, it says so
+        req.endpoint.base_url = "https://api.openai.com/v1".into();
+        req.no_more_tools = true;
+        let b = body_of(&req);
+        assert!(b["messages"][1].get("reasoning_content").is_none());
+        assert_eq!(b["tool_choice"], json!("none"));
     }
 
     #[test]

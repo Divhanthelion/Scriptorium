@@ -8,6 +8,10 @@ much Scripture was attached, then token usage. A question containing "slow" stre
 slowly (for testing Stop); one containing "fail" gets a 500; one containing "long"
 streams a long reasoning trace and a long answer (for testing scrolling). With
 chat_template_kwargs.enable_thinking false there is no reasoning, as with vLLM.
+
+Offered tools, a question containing "look up" gets a call to read the WEB's John
+3:16 first (after a line of text, as models often write), and then an answer quoting
+what came back.
 """
 
 import json
@@ -44,9 +48,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(404, {"error": {"message": "not found"}})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         system = body["messages"][0]["content"]
-        question = body["messages"][-1]["content"]
+        question = next(m["content"] for m in reversed(body["messages"]) if m["role"] == "user")
         if "fail" in question:
             return self.send_json(500, {"error": {"message": "mock failure"}})
+        looked_up = [m["content"] for m in body["messages"] if m["role"] == "tool"]
+        if "look up" in question and body.get("tools"):
+            return self.look_up(looked_up)
         refs = re.findall(r'<passage ref="([^"]*)"', system)
         scope = "; ".join(refs) if refs else "nothing"
         verses = sum(1 for line in system.splitlines() if line[:1].isdigit() or line.startswith("(title)"))
@@ -90,6 +97,37 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"0\r\n\r\n")
         except (BrokenPipeError, ConnectionResetError):
             pass  # the app stopped the answer
+
+    def look_up(self, looked_up):
+        """First a call to read the WEB's John 3:16; once it has come back, an answer
+        quoting it."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+
+        def event(payload):
+            data = f"data: {json.dumps(payload) if isinstance(payload, dict) else payload}\n\n".encode()
+            self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
+            self.wfile.flush()
+            time.sleep(0.01)
+
+        if not looked_up:
+            event({"choices": [{"delta": {"reasoning_content": "The WEB isn't attached."}}]})
+            event({"choices": [{"delta": {"content": "Let me check the WEB."}}]})
+            call = {"index": 0, "id": "call_1", "type": "function", "function": {"name": "read", "arguments": ""}}
+            event({"choices": [{"delta": {"tool_calls": [call]}}]})
+            args = json.dumps({"references": "John 3:16", "translations": ["web"]})
+            for piece in (args[:20], args[20:]):
+                event({"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": piece}}]}}]})
+            event({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
+            event({"choices": [], "usage": {"prompt_tokens": 3000, "completion_tokens": 30}})
+        else:
+            verse = next((l[3:] for l in looked_up[-1].splitlines() if l.startswith("16 ")), "nothing")
+            event({"choices": [{"delta": {"content": f"The WEB has: “{verse}” (John 3:16, WEB)."}, "finish_reason": "stop"}]})
+            event({"choices": [], "usage": {"prompt_tokens": 3200, "completion_tokens": 40}})
+        event("[DONE]")
+        self.wfile.write(b"0\r\n\r\n")
 
 
 if __name__ == "__main__":
