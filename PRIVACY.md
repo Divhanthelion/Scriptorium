@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Scriptorium** collects no personal data.
+**Scriptorium** sends nothing to its developers: it has no servers, accounts, analytics, or tracking. The only data that ever leaves your device is what you choose to send to an AI service you set up yourself (see the study assistant, below).
 
 - The app works entirely offline. The translations, commentaries, cross-references, Hebrew and Greek texts, and lexicons are built into the app.
 - It has no accounts, analytics, advertising, or tracking, and it makes no network requests of its own.
