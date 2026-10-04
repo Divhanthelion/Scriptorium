@@ -21,3 +21,7 @@ app/gen/schemas/
 /target-sword/
 /target-agent/
 /target-test/
+
+# Signing keys never belong in the repository (see docs/RELEASING.md)
+*.jks
+*.keystore
