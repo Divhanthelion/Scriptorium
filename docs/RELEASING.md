@@ -12,8 +12,8 @@ These need your identity, payment, or tax details, so they can't be automated.
 
 - Enroll at https://developer.apple.com/programs/ ($99/year). Individual enrollment takes about a day.
 - In App Store Connect, create an app with bundle ID `io.github.divhanthelion.scriptorium`, category **Reference**, age rating 4+.
-- Create an **App Store Connect API key** (Users and Access → Integrations) for automated uploads.
-- Secrets the workflow uses: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password), `APPLE_TEAM_ID`, plus the API key.
+- Secrets the workflow uses today (macOS signing and notarization): `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password), `APPLE_TEAM_ID`. iOS signing and App Store upload are not wired into the workflow yet; when they are, create an **App Store Connect API key** (Users and Access → Integrations) for automated uploads.
+- Before the first iOS upload: commit the generated `app/gen/apple` project with `app/PrivacyInfo.xcprivacy` copied into the bundle (Apple rejects binaries without a privacy manifest, ITMS-91053), and answer the export-compliance question (the app's HTTPS uses rustls, not only the OS libraries — answer the questionnaire accordingly or add `ITSAppUsesNonExemptEncryption` once reviewed).
 
 ### 2. Google Play (Android), step by step
 
@@ -141,11 +141,17 @@ An individual Partner Center account is free, and the Store signs the package it
 
 To build a Store package locally instead: `powershell -File app/windows/msix/pack.ps1 -Exe target/release/scriptorium.exe` (needs the Windows SDK).
 
-**Outside the Store**, Windows SmartScreen warns "Windows protected your PC" on the GitHub installer until it's signed. Azure Trusted Signing (about $10/month; individuals in the US and Canada can validate) signs installers in CI. The Store copy doesn't need it.
+**Outside the Store**, Windows SmartScreen warns "Windows protected your PC" on the GitHub installer until it's signed. Azure Trusted Signing (about $10/month; individuals in the US and Canada can validate) can sign them in CI, though that step isn't wired into `release.yml` yet. The Store copy doesn't need it.
 
 ### 4. Flathub (Linux)
 
 - Free. Submission is a pull request to https://github.com/flathub/flathub adding a manifest for `io.github.divhanthelion.scriptorium`; Flathub verifies the ID against this GitHub account.
+
+## Release mechanics
+
+- The tag must match the version in `app/tauri.conf.json` and `app/Cargo.toml`; the workflow refuses to build otherwise.
+- Unsigned macOS downloads show Gatekeeper's “damaged or incomplete” warning on Apple Silicon until notarization is set up; the Mac App Store build (sandboxed, `.pkg`) is a separate effort not in the pipeline yet.
+- Desktop installers from GitHub have no auto-updater; store builds update through their stores.
 
 ## Store listing checklist
 

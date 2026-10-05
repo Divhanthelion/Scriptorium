@@ -126,6 +126,20 @@ fn typed_references_become_passages() {
     assert!(parse("", "kjv").is_err());
 }
 
+/// The label names the verses actually attached, not the range asked for.
+#[test]
+fn range_labels_name_the_verses_attached() {
+    let label = |refs: &str| {
+        let c = context::build(data(), lib(), &spec(vec![passage("kjv", refs)]), None);
+        c.map(|c| (c.label, c.verses))
+    };
+    assert_eq!(label("JHN.3.30-JHN.3.99").unwrap(), ("John 3:30–36".to_string(), 7));
+    assert_eq!(label("JHN.3.36-JHN.3.99").unwrap(), ("John 3:36".to_string(), 1));
+    assert_eq!(label("PSA.51.0-PSA.51.3").unwrap(), ("Psalm 51:title–3".to_string(), 4));
+    // Psalm 1 has no title: a range from it starts at verse 1
+    assert_eq!(label("PSA.1.0-PSA.1.2").unwrap(), ("Psalm 1:1–2".to_string(), 2));
+}
+
 #[test]
 fn labels_for_books() {
     let label = |refs: &str| build(&spec(vec![passage("kjv", refs)])).label;
@@ -268,6 +282,13 @@ fn original_words_follow_each_kjv_verse_or_stand_alone() {
     assert!(hebrew.contains("H430 God"), "{}", hebrew);
     assert_eq!(hebrew.matches(" | ").count(), 6, "7 words: {}", hebrew);
     assert!(context::instructions(lib(), &c).contains("Under each KJV verse"));
+    // Aramaic is named as Aramaic, not Hebrew
+    for refs in ["DAN.2.5", "JER.10.11"] {
+        let mut s = spec(vec![passage("kjv", refs)]);
+        s.original = true;
+        let c = build(&s);
+        assert!(c.text.lines().any(|l| l.starts_with("   Aramaic: ")), "{}: {}", refs, c.text);
+    }
 
     // Without the KJV, they come in a block of their own, in its numbering
     let mut s = spec(vec![passage("dra", "PSA.22.1")]);

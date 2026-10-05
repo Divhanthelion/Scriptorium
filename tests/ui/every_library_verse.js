@@ -20,7 +20,7 @@ async (bible, limit, only = null) => {
     return collapse([...p.querySelectorAll(".line")].map((l) => l.textContent).join(" "));
   };
   const api = async (book, chapter) =>
-    (await fetch("/api/bible_chapter", { method: "POST", body: JSON.stringify({ bible, book, chapter }) })).json();
+    (await fetch("/api/bible_chapter", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bible, book, chapter }) })).json();
 
   // Where the app is now: find it from the heading by asking for the same chapter
   let chapters = 0;
