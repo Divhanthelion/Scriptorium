@@ -366,7 +366,7 @@ await test("Search: nothing chosen, Greek accents, and keys inside a dialog", "b
   $$('[aria-label="Search in"] button')[0].click();
   await until(() => $("#panel-body .result-summary"), "the KJV again");
   // Greek as a keyboard types it (tonos) finds Chrysostom's (oxia)
-  const r = await (await fetch("/api/search_source", { method: "POST", body: JSON.stringify({ query: "\u03bb\u03cc\u03b3\u03bf\u03c2", kind: "commentary", source: "chrysostom", scope: "all", book: null, limit: 5 }) })).json();
+  const r = await (await fetch("/api/search_source", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: "\u03bb\u03cc\u03b3\u03bf\u03c2", kind: "commentary", source: "chrysostom", scope: "all", book: null, limit: 5 }) })).json();
   assert(r.total > 0 && r.hits[0].segments.some((x) => x.hit), "found and marked: " + JSON.stringify(r).slice(0, 200));
   // Keys pressed in a dialog stay in it: no turning the page, no closing the panel behind
   $("#translation-button").click();
@@ -451,6 +451,7 @@ async function aiSettings(ai) {
   await sleep(300);
   await fetch(`${BASE}/api/settings_save`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ai: { providers: [MOCK], providerId: "mock", model: null, scope: "chapter", books: [], consent: {}, calibration: {}, ...ai } }),
   });
 }
@@ -552,9 +553,9 @@ await test("Chat: the assistant looks up what isn't attached, and shows what it 
   assert(lastAnswer().querySelector(".msg-usage").textContent.startsWith("6k in · 70 out"), "usage: " + lastAnswer().querySelector(".msg-usage").textContent);
   // Saved with what was looked up (not its text)
   await wait(300);
-  const list = await (await fetch("/api/conversations_list", { method: "POST", body: "{}" })).json();
+  const list = await (await fetch("/api/conversations_list", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
   const saved = list.find((x) => x.title.startsWith("Please look up how the WEB"));
-  const c = await (await fetch("/api/conversation_load", { method: "POST", body: JSON.stringify({ id: saved.id }) })).json();
+  const c = await (await fetch("/api/conversation_load", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: saved.id }) })).json();
   const l = c.messages.at(-1).lookups[0];
   assert(l.label === "John 3:16 · WEB" && l.tool === "read" && !("text" in l), "saved: " + JSON.stringify(l));
   // Turned off, nothing is looked up
@@ -703,7 +704,7 @@ await test("Chat: conversations are saved, starred, renamed, reopened, and clear
   const rows = () => $$(".conversation-row .row-main").map((e) => e.textContent);
   const historyView = () => $('[aria-label="Conversations"]');
   // Start from an empty list (the earlier chat tests saved theirs)
-  const api = (name, body) => fetch("/api/" + name, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
+  const api = (name, body) => fetch("/api/" + name, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
   for (const c of await api("conversations_list", {})) await api("conversation_delete", { id: c.id });
   $('[data-open-panel="chat"]').click();
   await until(() => $(".chat-model")?.value.endsWith("mock-model"), "model list");
@@ -1046,7 +1047,7 @@ await test("Cross-references: in the translation being read, with the KJV's word
 // full and the opening of every other translation.
 {
   const sweep = readFileSync(new URL("./every_library_verse.js", import.meta.url), "utf8");
-  const bibles = await (await fetch(`${BASE}/api/bibles`, { method: "POST", body: "{}" })).json();
+  const bibles = await (await fetch(`${BASE}/api/bibles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
   const full = new Set(process.env.FULL_SWEEP ? bibles.map((b) => b.id) : ["web", "dra", "brenton", "kjvcpb", "jps", "ojb"]);
   let chapters = 0;
   let verses = 0;
@@ -1073,6 +1074,44 @@ await test("Cross-references: in the translation being read, with the KJV's word
     `Every library verse on screen matches its text (${verses} verses, ${chapters} chapters; full: ${[...full].join(", ")})`,
     problems.length ? `FAIL: ${problems.length} problems\n      ${problems.slice(0, 40).join("\n      ")}` : "ok",
   ]);
+}
+
+// ------------------------------------------------------------------ every KJV verse on screen
+
+// Every chapter of the KJV's own 66 books as drawn, compared with old_testament/ and
+// new_testament/ character by character (crates/core/tests/text_fidelity.rs checks those
+// files against the source)
+{
+  const books = await (await fetch(`${BASE}/api/books`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
+  const chapters = [];
+  for (const b of books) {
+    const dir = b.testament === "old" ? "old_testament" : "new_testament";
+    const raw = readFileSync(new URL(`../../${dir}/${b.name}.txt`, import.meta.url), "utf8");
+    for (const line of raw.split(/\r?\n/).filter(Boolean)) {
+      const [, c, v, text] = /^(\d+):(\d+) (.*)$/.exec(line);
+      if (chapters.at(-1)?.book !== b.name || chapters.at(-1).chapter !== Number(c)) {
+        chapters.push({ book: b.name, testament: b.testament, chapter: Number(c), label: `${b.name} ${c}`, lines: [] });
+      }
+      chapters.at(-1).lines.push([Number(v), text]);
+    }
+  }
+  const sweep = readFileSync(new URL("./every_verse.js", import.meta.url), "utf8");
+  for (const view of ["kjv", "interlinear"]) {
+    const name = `Every verse on screen matches the text, character for character (${chapters.length} chapters, ${view} view)`;
+    try {
+      // Each Testament from its first chapter: in Scriptorium the KJV's Apocrypha comes
+      // between them (the library sweep reads it)
+      const problems = [];
+      for (const [testament, first] of [["old", "Genesis"], ["new", "Matthew"]]) {
+        await open(`tr=kjv&book=${first}&chapter=1&view=${view}`);
+        const part = chapters.filter((c) => c.testament === testament);
+        problems.push(...(await run(`async () => (${sweep})(${JSON.stringify(part)}, ${JSON.stringify(view)})`)));
+      }
+      results.push([name, problems.length ? `FAIL: ${problems.length} problems\n      ${problems.join("\n      ")}` : "ok"]);
+    } catch (error) {
+      results.push([name, `FAIL: ${error.message}`]);
+    }
+  }
 }
 
 results.push(["No console errors", consoleErrors.length ? `FAIL: ${consoleErrors.join(" | ")}` : "ok"]);

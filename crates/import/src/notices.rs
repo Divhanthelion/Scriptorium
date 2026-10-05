@@ -2,8 +2,10 @@
 //! the app's dependency graph (for every platform it builds on), with its licence and
 //! the licence texts it ships, so the app can carry them as their licences require.
 //!
-//!     cargo run -p kjv-import -- notices        write NOTICE, ui/software.json, and THIRD-PARTY-SOFTWARE.md
-//!     cargo run -p kjv-import -- notices check  fail if they are out of date
+//! ```text
+//! cargo run -p kjv-import -- notices        write NOTICE, ui/software.json, and THIRD-PARTY-SOFTWARE.md
+//! cargo run -p kjv-import -- notices check  fail if they are out of date
+//! ```
 //!
 //! NOTICE lists every work the app carries (from the catalogues in data/library/, with
 //! each one's licence and credit) after the sections in licenses/NOTICE-fixed.txt.

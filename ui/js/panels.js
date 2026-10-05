@@ -11,7 +11,7 @@ import { ORIG_SCALES, TEXT_SCALES } from "./settings.js";
  * ctx = {
  *   state, settings, bookName(book) -> display name, reference(book, ch, v),
  *   goTo(book, chapter, verse, { highlight }), changeSettings(mutator), toast(msg),
- *   openPanel(name), refreshPanel()
+ *   openPanel(name), refreshPanel(), updateActions()
  * }
  */
 
@@ -81,21 +81,30 @@ export function renderStrongs(body, ctx) {
     enterkeyhint: "search",
   });
   const output = h("div", { "aria-live": "polite" });
+  // Enter looks up, then leaving the box fires "change": look each number up once
+  let looked = null;
 
   const run = async () => {
     st.query = input.value;
     const query = input.value.trim();
+    // A tapped word carries its sense code (H0430G) while the box shows H430
+    const lookup = st.lookupKey ?? query;
+    st.lookupKey = null;
+    if (query === looked) return;
+    looked = query;
     const seq = ++strongsSeq;
     if (!query) {
       st.results = null;
       return draw();
     }
     try {
-      const r = await call("strongs", { query });
+      const r = await call("strongs", { query: lookup });
       if (seq !== strongsSeq) return;
       st.results = r;
       draw();
     } catch (error) {
+      if (seq !== strongsSeq) return;
+      looked = null; // let Enter try again
       replace(output, h("p", { class: "empty" }, `Lookup failed: ${error.message ?? error}`));
     }
   };
@@ -178,6 +187,7 @@ export function renderSaved(body, ctx) {
                   ctx.changeSettings((s) => {
                     s.bookmarks = s.bookmarks.filter((x) => x !== b);
                   });
+                  ctx.updateActions(); // the selected verse's Bookmark button
                   ctx.refreshPanel();
                 },
               },
@@ -202,7 +212,8 @@ export function renderSaved(body, ctx) {
                 {
                   class: "row-button",
                   type: "button",
-                  onclick: () => ctx.goTo(entry.book, entry.chapter, 1, { fromPanel: true, top: true }),
+                  // The chapter from the top, with no verse selected
+                  onclick: () => ctx.goTo(entry.book, entry.chapter, 0, { fromPanel: true, top: true }),
                 },
                 h(
                   "span",
