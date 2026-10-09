@@ -17,9 +17,11 @@ The interlinear stays, but it is no longer the centre of the app.
 
 ## Decisions
 
-- **English only, all bundled, fully offline.** The app still makes no network
-  requests of its own; only the opt-in assistant talks to the provider the reader
-  chose.
+- **English first, all bundled, fully offline.** The library began English only; it now
+  also has Spanish and Portuguese translations (October 2026), and other languages are
+  added the same way (see "Translations in other languages"). The app's own words stay
+  English. The app still makes no network requests of its own; only the opt-in assistant
+  talks to the provider the reader chose.
 - **Licences.** Public domain, CC0, CC BY, CC BY-SA, CC BY-ND, and CC BY-NC(-ND/-SA)
   are all acceptable. The app never charges money and never alters a text. Every
   work carries its licence and required attribution, shown in the app and in NOTICE.
@@ -32,7 +34,7 @@ The interlinear stays, but it is no longer the centre of the app.
 
 | Kind | Work | Source | Keyed to | Licence |
 |---|---|---|---|---|
-| Bibles | ~35 English translations (list in `data/library/bibles/`) | eBible.org USFM, cross-checked against eBible VPL | each translation's own numbering | per translation |
+| Bibles | 44 English translations, 7 Spanish, 4 Portuguese (list in `data/library/bibles.toml`) | eBible.org USFM, cross-checked against eBible VPL | each translation's own numbering | per translation |
 | Commentary | Matthew Henry, Complete | CrossWire `MHC` | KJV | Public domain |
 | Commentary | Catena Aurea (Aquinas) | CrossWire `Catena` | KJV | Public domain |
 | Commentary | Tyndale Open Study Notes: study notes and book introductions (`tyndale`); profiles of people and theme articles (`tyndalearticles`) | `tyndale_open-studynotes.zip` from tyndaleopenresources.com (its XML) | NLT numbering, placed on the KJV's (3 John 1:15 and Revelation 12:18 are the KJV's 1:14 and 13:1) | CC BY-SA 4.0 |
@@ -181,7 +183,7 @@ prints Susanna and the additions to Esther in its Apocrypha where Catholic Bible
 print them in Daniel and Esther. Published mapping tables cover some of this, with
 known errors.
 
-Every text in the library is English, so the library aligns verses by what they say
+Every English text in the library is aligned with the KJV by what it says
 (`crates/library/src/align.rs`): the distinctive words two verses share (names,
 numbers, rarer words), in two passes.
 
@@ -232,10 +234,52 @@ these hard cases.
   (a note begun in the chapter before folded, as it was read there), and the chapters
   either side to read on. On a phone both panels are under the Study tab.
 
+
+### Translations in other languages
+
+A Spanish or Portuguese text can't be compared word for word with the KJV's English, so
+`kjv-import align` matches its verses another way (`crates/import/src/align.rs`,
+`by_numbers`), book by book, by the first of these that applies:
+
+1. **Read.** A few verses are matched by reading them, each recorded with its reason in
+   `bibles.toml` (`counterparts`): the critical text's order of Philippians 1:16-17 (its
+   1:16, "por amor", is the KJV's 1:17), and NBV-PT's 1 Samuel 20:43.
+2. **As the English translation it was made from** (`follows`): the drafts made from the
+   WEB (BLM, BLL, BPM) and the editions of the Free Bible Version (VBL, BLPT) divide and
+   order their verses as their source does, so where a book is numbered exactly as there,
+   it is matched as the source was matched by content: the WEB's Romans doxology at
+   14:24-26, its Matthew 23:13-14, Greek Esther.
+3. **By content, within its own language** (`compared_with`): a book with placeholder
+   verses (a number with no text) is divided otherwise than its numbers say. RV1909
+   divides some books as the Hebrew does and keeps the KJV's numbers with empty verses
+   (its 1 Samuel 23:29 is empty and its 24:1 is the KJV's 23:29; its Jonah 1:17 is empty and
+   its 2:1 is the KJV's 1:17).
+   Those books are aligned by content with a Spanish translation numbered and divided as
+   the KJV (La Biblia en Español Sencillo), and matched as it is.
+4. **By number.** A book numbered exactly as the KJV numbers it (a Psalm title may be
+   printed inside verse 1) is matched verse for verse; a bridged verse ("1-3") stands
+   for its range.
+5. **As an English translation numbered the same way**: Palabra de Dios para ti numbers
+   2 Corinthians 13 as the Douay-Rheims does (its 13:13 is the KJV's 13:14), 3 John 1:15
+   and Revelation 12:18 as several English translations do.
+6. **By number as far as the numbers go**, and reported (none are, today).
+
+Verses a text-critical edition reorders follow their numbers unless one of the first
+two rules says otherwise, as Bible software usually maps references.
+
+The check is the verses' lengths (`crates/library/tests/alignment.rs`): in a chapter
+matched a verse off, a translation's verse lengths fit those of the KJV's verses a verse
+before or after far better than those of the verses they're matched with. Number alone
+put four of RV1909's chapters a verse off (1 Samuel 24 fit 0.88 a verse before, -0.11 as
+matched); the test fails on those, and passes now. Paraphrase fits loosely either way,
+so a chapter is flagged only on a clear difference, and the two flagged and then read
+(both rightly matched) are named in the test.
+
 ## Search
 
 Search finds what it always has (case, curly quotes, dashes, and "æ" set aside,
-anywhere in a verse, across words), now in any source. Greek typed on a keyboard finds
+anywhere in a verse, across words), now in any source, with accents set aside too
+("corazon" finds "corazón", "coracao" "coração"). Greek typed on a keyboard finds
 Greek printed with polytonic accents (Chrysostom's λόγος, its ό an oxia, is found by
 λόγος typed with a tonos), and final ς is σ
 (`crates/core/src/search.rs`, `ui/js/search.js`):

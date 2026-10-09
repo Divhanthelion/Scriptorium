@@ -620,6 +620,160 @@ sha256 = "4514aced8d3cd1dc4023bc99f2ab291ef6fd4003a5d63c29346c77f9a87c4284"
 retrieved = "2026-10-02"
 
 [[source]]
+path = "ebible/spaRV1909_usfm.zip"
+url = "https://ebible.org/Scriptures/spaRV1909_usfm.zip"
+size = 2380145
+sha256 = "488ca0d7f4e9ab974745b47eca305b876491339d6973bc3e5a23244bebea6b5c"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spaRV1909_vpl.zip"
+url = "https://ebible.org/Scriptures/spaRV1909_vpl.zip"
+size = 4401437
+sha256 = "fae98d87ed610f959443faa6b71ede0a5aba0c86f285badf53d2a209ee705fd9"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spavbl_usfm.zip"
+url = "https://ebible.org/Scriptures/spavbl_usfm.zip"
+size = 2695258
+sha256 = "8c71359e654b6a848ba9a49455ebeb8e6f69dc28112cd729b35fd4b95591dc1d"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spavbl_vpl.zip"
+url = "https://ebible.org/Scriptures/spavbl_vpl.zip"
+size = 4726041
+sha256 = "d86145011e4cd3375684630cfa5be5e0f60a87c9d72031ae732dd8364c412c7a"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spapddpt_usfm.zip"
+url = "https://ebible.org/Scriptures/spapddpt_usfm.zip"
+size = 2466219
+sha256 = "8f90921ee8997ea1310663375e225bc5f747936974bd64af105d762c0fde057d"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spapddpt_vpl.zip"
+url = "https://ebible.org/Scriptures/spapddpt_vpl.zip"
+size = 4331903
+sha256 = "3c6bc0f90f3654f6c3d0371115610e48fdf5c009ce068b844daf474af2a7aade"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spaonbv_usfm.zip"
+url = "https://ebible.org/Scriptures/spaonbv_usfm.zip"
+size = 1570118
+sha256 = "10220cdfb71203826ff1402ed0481bedb6eb1824aebbae34b89a6f94e4403587"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spaonbv_vpl.zip"
+url = "https://ebible.org/Scriptures/spaonbv_vpl.zip"
+size = 4719463
+sha256 = "b7c68655058f934e5a26298cd492d3bc50acf6a8b8eb0def054aa42c9aee52bb"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spablm_usfm.zip"
+url = "https://ebible.org/Scriptures/spablm_usfm.zip"
+size = 2893082
+sha256 = "f7469bc4a20140ecf6a368c1291aad4a42bc09a07483694de9163fa1d3040ef6"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spablm_vpl.zip"
+url = "https://ebible.org/Scriptures/spablm_vpl.zip"
+size = 5557488
+sha256 = "28b868121dd212d9df2702558ad09d7c8417ea4eb4457c6e088c9a3749f70fb6"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spabll_usfm.zip"
+url = "https://ebible.org/Scriptures/spabll_usfm.zip"
+size = 2903926
+sha256 = "b7b7e904504939969ffed75f5a6559628ebe8aec4f5d09f7bf608d9db14d7f70"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spabll_vpl.zip"
+url = "https://ebible.org/Scriptures/spabll_vpl.zip"
+size = 5723077
+sha256 = "6403ea295749e7bd4824d5c646a4a0095730b4ef28f562db195245f3028c7070"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spabes_usfm.zip"
+url = "https://ebible.org/Scriptures/spabes_usfm.zip"
+size = 2265685
+sha256 = "55214d3b76775c78859ec1b355077da7ef53e8b7cbe0d0bcffc4f563b24a89af"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/spabes_vpl.zip"
+url = "https://ebible.org/Scriptures/spabes_vpl.zip"
+size = 4187224
+sha256 = "61149af7fb7fb60eb1e0d5df019394fc4df0a9e59b7f3ccf005710e608662961"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/porbr2018_usfm.zip"
+url = "https://ebible.org/Scriptures/porbr2018_usfm.zip"
+size = 1448160
+sha256 = "adda51da837676b7bcc91a57c18578d86ec505baf951d5170adddb8389e5d163"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/porbr2018_vpl.zip"
+url = "https://ebible.org/Scriptures/porbr2018_vpl.zip"
+size = 4377828
+sha256 = "ac3465962663c7fd9890d4cb173c221ac06807c979ae53e58cea48a62ea414de"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/poronbv_usfm.zip"
+url = "https://ebible.org/Scriptures/poronbv_usfm.zip"
+size = 1712372
+sha256 = "c27f5af5186c89266865024bf16defd546d527a0eff26de5f674812c8fa7907e"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/poronbv_vpl.zip"
+url = "https://ebible.org/Scriptures/poronbv_vpl.zip"
+size = 5024051
+sha256 = "4de44562d2beee38edae1dc4f748e68a5106559358c6030da89664c14147d26c"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/porbrbsl_usfm.zip"
+url = "https://ebible.org/Scriptures/porbrbsl_usfm.zip"
+size = 1865097
+sha256 = "eb269e2716a4d6be6b1e0efbe7c2c290af16339e1df1a682e9952e4fbd27e825"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/porbrbsl_vpl.zip"
+url = "https://ebible.org/Scriptures/porbrbsl_vpl.zip"
+size = 5507992
+sha256 = "72951e73405cd9ff715ca72fb29769059708154cba22e35d9abf12c286145588"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/porblt_usfm.zip"
+url = "https://ebible.org/Scriptures/porblt_usfm.zip"
+size = 465291
+sha256 = "feee2faff33ada687441478e7fd66625f131fda6b35f8438ae68b2ac5227a9d1"
+retrieved = "2026-10-09"
+
+[[source]]
+path = "ebible/porblt_vpl.zip"
+url = "https://ebible.org/Scriptures/porblt_vpl.zip"
+size = 1224207
+sha256 = "d6b7e33f38e3a69a242569fccea97237d95c103fb32097ff71ef4c4bfae5f42d"
+retrieved = "2026-10-09"
+
+[[source]]
 path = "crosswire/MHC.zip"
 url = "https://www.crosswire.org/ftpmirror/pub/sword/packages/rawzip/MHC.zip"
 size = 15195123

@@ -386,14 +386,14 @@ await test("About and Licences: every work's licence and credit, and every packa
   $('[data-open-panel="settings"]').click();
   const about = await until(() => $(".about"), "about");
   assert(about.querySelector("strong").textContent === "Scriptorium", "the app's name");
-  assert(about.textContent.includes("44 English translations"), "what it is: " + about.textContent.slice(0, 200));
+  assert(about.textContent.includes("55 translations in English, Spanish, and Portuguese"), "what it is: " + about.textContent.slice(0, 200));
   $$(".about-actions .button").find((b) => b.textContent === "Licences").click();
   await until(() => $("#licences")?.open && $$(".licence-group").length, "licences");
   const sections = $$(".licence-section .section-title").map((t) => t.textContent);
   assert(sections.join() === "Scriptorium,Bible translations,Audio Bibles,Commentaries,Cross-references,Hebrew, Aramaic, Greek, and the KJV,Fonts,Open-source software", "sections: " + sections);
   // Every translation, commentary, and collection appears once, under its licence
   const works = (title) => [...$$(".licence-section").find((s) => s.querySelector(".section-title").textContent === title).querySelectorAll(".licence-works li")];
-  assert(works("Bible translations").length === 44, "44 translations: " + works("Bible translations").length);
+  assert(works("Bible translations").length === 55, "55 translations: " + works("Bible translations").length);
   assert(works("Commentaries").length === 11, "11 commentaries: " + works("Commentaries").length);
   assert(works("Cross-references").length === 2, "2 collections");
   // The audio Bibles: who reads which translation, each under its licence
@@ -449,7 +449,9 @@ await test("Phone: tab bar and full-screen panels", "book=John&chapter=3", { wid
 
 // ------------------------------------------------------------------ AI assistant
 
-const MOCK = { id: "mock", preset: "local", name: "Test server", kind: "openai", baseUrl: "http://127.0.0.1:8765/v1", contextWindow: null };
+// (MOCK_PORT: where mock_llm.py listens, when something else has 8765)
+const MOCK_PORT = process.env.MOCK_PORT || "8765";
+const MOCK = { id: "mock", preset: "local", name: "Test server", kind: "openai", baseUrl: `http://127.0.0.1:${MOCK_PORT}/v1`, contextWindow: null };
 async function aiSettings(ai) {
   // Leave the app first: it saves its own settings as it unloads
   await send("Page.navigate", { url: "about:blank" });
@@ -481,7 +483,7 @@ await test("Chat asks consent, then streams an answer about the attached chapter
   assert($(".chat-scope-size").textContent === "≈4k of 32k tokens", "budget: " + $(".chat-scope-size").textContent);
   await ask("Why did Jesus weep?");
   await until(() => !$(".chat-consent").hidden, "consent prompt");
-  assert($(".chat-consent").textContent.includes("127.0.0.1:8765"), "consent names the server");
+  assert($(".chat-consent").textContent.includes("127.0.0.1:${MOCK_PORT}"), "consent names the server");
   $$(".chat-consent button").find((b) => b.textContent === "Allow and send").click();
   await until(() => finished() && lastAnswer().querySelector(".msg-tools"), "answer");
   assert($("#chat-input").value === "", "the question box is cleared after sending");
@@ -771,7 +773,7 @@ await test("Translations: pick one, read it, keep the place", "book=John&chapter
   assert($("#translation-label").textContent === "KJV", "starts on the KJV");
   $("#translation-button").click();
   await until(() => $("#translations").open, "translation picker");
-  assert($$(".translation-item").length === 44, "44 translations: " + $$(".translation-item").length);
+  assert($$(".translation-item").length === 55, "55 translations: " + $$(".translation-item").length);
   assert($(".translation-item[aria-current='true'] .translation-abbr").textContent === "KJV", "current marked");
   const find = $("#translations input");
   find.value = "berean";
@@ -809,6 +811,62 @@ await test("Translations: switching keeps the place, across different numbering"
   await until(() => $("#translations").open, "translation picker again");
   $$(".translation-item").find((b) => b.querySelector(".translation-abbr").textContent === "KJV").click();
   await until(() => $("#translation-label").textContent === "KJV" && $("#ref-label").textContent === "Psalm 23", "back to KJV Psalm 23");
+`);
+
+await test("Translations: Spanish and Portuguese, in their own languages, aligned with the KJV", "book=First%20Samuel&chapter=24&tr=kjv", {}, `
+  const pick = async (abbr) => {
+    $("#translation-button").click();
+    await until(() => $("#translations").open, "translation picker");
+    $$(".translation-item").find((b) => b.querySelector(".translation-abbr").textContent === abbr).click();
+    await until(() => $("#translation-label").textContent === abbr && $("#reader").getAttribute("aria-busy") === "false", abbr);
+  };
+  // Grouped by language, and found by it, accents aside
+  $("#translation-button").click();
+  await until(() => $("#translations").open, "translation picker");
+  const groups = $$("#translations .section-title").map((g) => g.textContent);
+  assert(groups.includes("Español") && groups.includes("Português"), "language groups: " + groups);
+  const find = $("#translations input");
+  for (const [q, n] of [["spanish", 7], ["portugues", 4]]) {
+    find.value = q;
+    find.dispatchEvent(new Event("input"));
+    await until(() => $$(".translation-item").length === n, q + ": " + $$(".translation-item").length);
+  }
+  $("#translations-close").click();
+  // The Reina-Valera, in Spanish, marked as Spanish; the heading is the app's
+  await pick("RV1909");
+  assert($("#ref-label").textContent === "1 Samuel 24", "the same chapter: " + $("#ref-label").textContent);
+  assert($("#v1").closest("[lang]").lang === "es" && $(".chapter-heading").closest("[lang]").lang === "en", "Spanish text, English heading");
+  assert($("#v1").textContent.includes("ENTONCES David subió de allí"), "24:1: " + $("#v1").textContent);
+  // It divides this chapter as the Hebrew does: its 24:1 is the KJV's 23:29
+  const switchButtons = () => [...$$("[data-view-switch]").find((g) => g.offsetParent !== null).querySelectorAll("button")].filter((b) => b.offsetParent !== null);
+  switchButtons().find((b) => b.textContent === "Parallel").click();
+  await until(() => $(".parallel-reading"), "parallel");
+  const names = () => $$(".pr-column-name").map((c) => c.textContent);
+  let added = false;
+  if (!names().includes("KJV")) {
+    $$(".pr-bar .chip").find((b) => b.textContent === "Translation").click();
+    await until(() => $("#translations").open, "picker");
+    $$("#translations .translation-item").find((b) => b.querySelector(".translation-abbr").textContent === "KJV").click();
+    await until(() => names().includes("KJV"), "the KJV beside it");
+    added = true;
+  }
+  const kjvCell = $("#v1").querySelectorAll(".pr-cell")[names().indexOf("KJV")];
+  assert(kjvCell.textContent.startsWith("23:29 And David went up from thence"), "beside the KJV's 23:29: " + kjvCell.textContent);
+  assert($("#v1 .pr-cell").lang === "es" && kjvCell.lang === "en", "each column in its language");
+  if (added) $$(".pr-chip").find((c) => c.textContent.startsWith("KJV")).querySelector("button").click();
+  switchButtons()[0].click();
+  await until(() => !$(".parallel-reading"), "plain text");
+  // Search without accents finds them, and marks what it found
+  $('[data-open-panel="search"]').click();
+  const input = await until(() => $("#search-input"), "search input");
+  input.value = "limpio corazon";
+  input.dispatchEvent(new Event("input"));
+  await until(() => $("#panel-body .result"), "results");
+  $$("#panel-body .result").find((r) => r.textContent.includes("Mateo 5:8") || r.textContent.includes("Matthew 5:8")).click();
+  await until(() => $("#ref-label").textContent === "Matthew 5" && $("#v8 mark"), "Matthew 5:8 marked");
+  assert($("#v8 mark").textContent === "limpio corazón", "the accented words marked: " + $("#v8 mark").textContent);
+  // Back to the KJV (settings persist between tests)
+  await pick("KJV");
 `);
 
 await test("Translations: words of Jesus in red", "book=John&chapter=11&tr=web", {}, `

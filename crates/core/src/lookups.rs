@@ -58,7 +58,14 @@ pub fn tools(lib: &Library) -> Vec<ToolSpec> {
     let xref_ids: Vec<&str> = lib.crossrefs().iter().map(|c| c.id.as_str()).collect();
     let catalogue = format!(
         "Translations: {}.\nCommentaries: {}.\nCross-references: {}.",
-        lib.bibles().iter().map(|b| format!("{} ({}, {})", b.id, b.name, b.year)).collect::<Vec<_>>().join("; "),
+        lib.bibles()
+            .iter()
+            .map(|b| match b.other_language() {
+                Some(l) => format!("{} ({}, {}, in {})", b.id, b.name, b.year, l),
+                None => format!("{} ({}, {})", b.id, b.name, b.year),
+            })
+            .collect::<Vec<_>>()
+            .join("; "),
         notes.iter().map(|c| format!("{} ({} by {}, {}; {})", c.id, c.name, c.author, c.year, c.tradition)).collect::<Vec<_>>().join("; "),
         lib.crossrefs().iter().map(|c| format!("{} ({})", c.id, c.name)).collect::<Vec<_>>().join("; "),
     );

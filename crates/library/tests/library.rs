@@ -34,7 +34,7 @@ fn text(parts: &[Part]) -> String {
 #[test]
 fn every_translation_opens_and_every_chapter_draws() {
     let lib = library();
-    assert_eq!(lib.bibles().len(), 44);
+    assert_eq!(lib.bibles().len(), 55);
     let mut chapters = 0;
     for b in lib.bibles() {
         assert!(!b.books.is_empty(), "{} has no books", b.id);
@@ -103,8 +103,8 @@ fn every_drawn_verse_reads_as_its_text() {
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
-    // Verses and Psalm titles across the 44 translations
-    assert_eq!(checked, 1_155_004);
+    // Verses and Psalm titles across the 55 translations
+    assert_eq!(checked, 1_493_762);
 }
 
 #[test]

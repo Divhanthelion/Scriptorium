@@ -4,6 +4,11 @@
 import { call } from "./backend.js";
 import { h, icon, replace } from "./dom.js";
 
+// Languages by name, so "Spanish" finds the Spanish translations (their group is "Español")
+const LANGUAGES = { en: "English", es: "Spanish", pt: "Portuguese", ka: "Georgian" };
+/** Lower case, accents aside: "espanol" finds "Español". */
+const plain = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
 let dialog, body;
 // Translations with an audio Bible, and who reads it
 const readers = new Map();
@@ -42,9 +47,9 @@ export function openTranslations(bibles, current, { pick = null, title = "Transl
   });
   const lists = h("div");
   const draw = () => {
-    const q = filter.value.trim().toLowerCase();
+    const q = plain(filter.value.trim());
     const matches = (b) =>
-      !q || b.abbr.toLowerCase().includes(q) || b.name.toLowerCase().includes(q) || b.year.toLowerCase().includes(q) || b.group.toLowerCase().includes(q)
+      !q || [b.abbr, b.name, b.year, b.group, LANGUAGES[b.language] ?? ""].some((x) => plain(x).includes(q))
       || (readers.has(b.id) && ("audio".includes(q) || "listen".includes(q)));
     const groups = [];
     for (const b of bibles.filter(matches)) {
