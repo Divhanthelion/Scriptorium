@@ -1,6 +1,7 @@
 //! KJV text, Hebrew/Greek interlinear data, and search, independent of any UI.
 
 pub mod api;
+pub mod audio;
 pub mod bundle;
 pub mod context;
 pub mod dispatch;

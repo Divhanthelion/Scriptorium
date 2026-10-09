@@ -46,7 +46,7 @@ function wordCard(word, lang) {
       class: "word",
       type: "button",
       dir: "ltr",
-      "data-key": word.key,
+      "data-key": word.dkey ?? word.key,
       "aria-label": label,
       disabled: word.key ? null : true,
     },
@@ -263,9 +263,18 @@ const GREEK = new Map([
   ["\u03C2", "\u03C3"],
 ]);
 
+/** Latin letters without their accents, as the search reads them (crates/library/src/text.rs,
+ * `unaccented`): "corazon" finds "corazón". */
+const UNACCENTED = new Map(
+  Object.entries({
+    a: "àáâãäåāăą", c: "çćč", d: "ď", e: "èéêëēĕėęě", g: "ğ", i: "ìíîïĩīĭį", n: "ñńň",
+    o: "òóôõöōŏő", r: "ř", s: "śšş", t: "ťţ", u: "ùúûüũūŭůűų", y: "ýÿ", z: "źżž",
+  }).flatMap(([base, accented]) => [...accented].map((c) => [c, base])),
+);
+
 /** One character folded as the search folds it (crates/library/src/text.rs): curly
  * quotes straight, dashes plain, "æ" as "ae", Greek oxia as tonos and final sigma as
- * sigma, spaces as spaces, lower case. */
+ * sigma, spaces as spaces, lower case, Latin letters unaccented. */
 function foldChar(c) {
   if (c === "\u2018" || c === "\u2019" || c === "\u201B" || c === "\u02BC") return "'";
   if (c === "\u201C" || c === "\u201D") return '"';
@@ -274,7 +283,7 @@ function foldChar(c) {
   if (c === "æ" || c === "Æ") return "ae";
   if (GREEK.has(c)) return GREEK.get(c);
   if (/\s/u.test(c)) return " ";
-  return c.toLowerCase();
+  return [...c.toLowerCase()].map((l) => UNACCENTED.get(l) ?? l).join("");
 }
 
 /**
@@ -359,6 +368,10 @@ export function renderLibraryChapter(container, chapter, { selectedVerse, nav, h
         : h("span"),
     ),
   );
+  // The text in its own language; the heading and the chapter links are the app's
+  if (chapter.language && chapter.language !== "en") {
+    for (const el of article.children) if (el.tagName !== "H1" && el.tagName !== "NAV") el.lang = chapter.language;
+  }
   if (highlight) markMatches(article, highlight);
   container.replaceChildren(article);
 }
@@ -370,7 +383,7 @@ export function renderLibraryChapter(container, chapter, { selectedVerse, nav, h
 function parallelCell(column, cell) {
   // Named on phones, where the columns stack (drawn from data-name, so it isn't text),
   // and always for screen readers
-  const attrs = (cls) => ({ class: cls, "data-name": column.abbr, role: "group", "aria-label": column.name || column.abbr });
+  const attrs = (cls) => ({ class: cls, "data-name": column.abbr, role: "group", "aria-label": column.name || column.abbr, lang: column.language || null });
   if (cell.above) return h("div", attrs("pr-cell is-above"), h("p", { class: "pr-note" }, "With the verse above"));
   if (!cell.verses.length) return h("div", attrs("pr-cell is-empty"), h("p", { class: "pr-note" }, "Not in this translation"));
   return h(

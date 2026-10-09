@@ -1,19 +1,22 @@
 //! Verse alignment tables: `data/library/alignment/<id>.tsv`.
 //!
 //! For each translation, the verses whose KJV counterpart is not simply the KJV
-//! verse with the same book, chapter, and number, found by content
-//! (kjv_library::align). Every verse not listed corresponds to its same-numbered
-//! KJV verse. The tables are reviewable: each row says how it was matched and how
-//! similar the texts are.
+//! verse with the same book, chapter, and number. An English translation's are found
+//! by content (kjv_library::align); one in another language can't be compared with the
+//! KJV's words, so its verses are matched by their numbers ([`by_numbers`]). Every
+//! verse not listed corresponds to its same-numbered KJV verse. The tables are
+//! reviewable: each row says how it was matched (and, by content, how similar the
+//! texts are).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
 
 use kjv_library::align::{self, How, Verse};
+use kjv_library::alignment::Alignment;
 use kjv_library::usfm::{self, Options};
 
-use crate::bibles::{Mode, catalogue};
+use crate::bibles::{Entry, Mode, catalogue};
 use crate::library;
 
 fn how_name(h: How) -> &'static str {
@@ -39,10 +42,16 @@ fn reference(chapter: u32, number: &str) -> String {
 
 /// The table for translation `id`.
 fn table(id: &str, markers: &[String], kjv_markers: &[String]) -> Result<String, String> {
+    table_against(id, markers, "kjv", kjv_markers)
+}
+
+/// Translation `id`'s alignment with translation `other` (the KJV, or another in the
+/// same language), by content.
+fn table_against(id: &str, markers: &[String], other: &str, other_markers: &[String]) -> Result<String, String> {
     let mut rows = String::new();
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     let mut total = 0usize;
-    let kjv = |code: &str| verses("kjv", code, kjv_markers);
+    let kjv = |code: &str| verses(other, code, other_markers);
     for b in kjv_library::books::BOOKS {
         let Some(native) = verses(id, b.code, markers) else { continue };
         total += native.len();
@@ -83,19 +92,264 @@ fn table(id: &str, markers: &[String], kjv_markers: &[String]) -> Result<String,
     Ok(out + &rows)
 }
 
+/// The KJV verses a verse's number names in its own book: itself, a bridged verse's
+/// whole range ("24-30"), a title its chapter's title.
+fn numbered(v: &Verse) -> Vec<(u32, String, bool)> {
+    let range = v.number.split_once('-').and_then(|(lo, hi)| Some((lo.parse::<u32>().ok()?, hi.parse::<u32>().ok()?)));
+    match range {
+        Some((lo, hi)) if !v.title && lo <= hi => (lo..=hi).map(|n| (v.chapter, n.to_string(), false)).collect(),
+        _ => vec![(v.chapter, v.number.clone(), v.title)],
+    }
+}
+
+/// The table for a translation not in English, whose words can't be compared with the
+/// KJV's. Each book is matched by the first of these that applies:
+///
+/// 1. A verse matched by reading it (`counterparts` in bibles.toml) has those KJV verses.
+/// 2. A translation made from an English one (`follows`) divides and orders its verses as
+///    that one does: where it numbers a book exactly as that one does, it is matched as
+///    that one was matched, by content ("like <id>"). The Spanish and Portuguese drafts
+///    made from the WEB get its Romans 16:25-27, Matthew 23:13-14, and Greek Esther.
+/// 3. A book with placeholder verses (a number with no text) is divided otherwise than
+///    its numbers say: RV1909's 1 Samuel 23:29 is empty and its 24:1 is the KJV's 23:29.
+///    Such a book is compared by content with a translation in the same language
+///    (`compared_with`) and matched as that one is ("content <id>"); the placeholders
+///    have no counterpart.
+/// 4. A book numbered exactly as the KJV numbers it (a Psalm title may be printed inside
+///    verse 1) is matched verse for verse, a bridged verse ("1-3") standing for its range
+///    ("number"). Verses a text-critical edition reorders, such as Philippians 1:16-17,
+///    then follow their numbers, as Bible software usually maps them.
+/// 5. Otherwise, as an English translation numbered exactly the same way was matched by
+///    content (the Douay-Rheims' 2 Corinthians 13:13 is the KJV's 13:14): "like <id>".
+/// 6. Otherwise by number as far as the numbers go, and the book is reported.
+fn by_numbers(b: &Entry, all: &[Entry], kjv_markers: &[String]) -> Result<String, String> {
+    let english: Vec<&Entry> = all.iter().filter(|e| e.language == "en" && e.id != "kjv").collect();
+    let find = |id: &str, why: &str| all.iter().find(|e| e.id == id).ok_or_else(|| format!("bibles.toml: {} {} {:?}: no such translation", b.id, why, id));
+    let follows = b.follows.as_deref().map(|id| find(id, "follows")).transpose()?;
+    let compared_with = b.compared_with.as_deref().map(|id| find(id, "compared_with")).transpose()?;
+    if follows.is_some_and(|f| f.language != "en") {
+        return Err(format!("bibles.toml: {} follows {:?}, which isn't English", b.id, b.follows));
+    }
+    if compared_with.is_some_and(|r| r.language != b.language || r.id == b.id) {
+        return Err(format!("bibles.toml: {} compared_with {:?}: give another translation in its language", b.id, b.compared_with));
+    }
+    let kjv_books: HashMap<&str, HashSet<(u32, String, bool)>> = kjv_library::books::BOOKS
+        .iter()
+        .filter_map(|k| Some((k.code, verses("kjv", k.code, kjv_markers)?.into_iter().map(|v| (v.chapter, v.number, v.title)).collect())))
+        .collect();
+    let kjv_has = |book: &str, chapter: u32, number: &str, title: bool| -> bool {
+        kjv_books.get(book).is_some_and(|vs| vs.contains(&(chapter, number.to_string(), title)))
+    };
+    // (a reference's number "0" is a Psalm title)
+    let kjv_has_ref = |r: &(String, u32, String)| kjv_has(&r.0, r.1, &r.2, r.2 == "0");
+    let mut tables: HashMap<String, Alignment> = HashMap::new();
+    let mut table_of = |id: &str| -> Result<Alignment, String> {
+        if !tables.contains_key(id) {
+            let path = library().join("alignment").join(format!("{}.tsv", id));
+            let tsv = fs::read_to_string(&path).map_err(|e| format!("{}: {} (align it first)", path.display(), e))?;
+            tables.insert(id.to_string(), Alignment::parse(&tsv.replace("\r\n", "\n"))?);
+        }
+        Ok(tables[id].clone())
+    };
+
+    // Verses matched by reading them: "1SA 20:43" = "1SA 20:42"
+    let parse = |r: &str| -> Option<(String, u32, String)> {
+        let (book, cv) = r.split_once(' ')?;
+        let (c, v) = cv.split_once(':')?;
+        Some((book.to_string(), c.parse().ok()?, v.to_string()))
+    };
+    let mut read: HashMap<(String, u32, String), Vec<(String, u32, String)>> = HashMap::new();
+    for (here, there) in &b.counterparts {
+        let bad = || format!("bibles.toml: {} counterparts: {:?} = {:?}", b.id, here, there);
+        let kjv: Vec<_> = if there == "-" { Vec::new() } else { there.split('+').map(parse).collect::<Option<_>>().ok_or_else(bad)? };
+        if !kjv.iter().all(&kjv_has_ref) {
+            return Err(format!("{}: the KJV hasn't that verse", bad()));
+        }
+        read.insert(parse(here).ok_or_else(bad)?, kjv);
+    }
+    let mut used = HashSet::new();
+
+    let mut rows = String::new();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut total = 0usize;
+    let mut unsure = Vec::new();
+    let shape = |vs: &[Verse]| vs.iter().map(|v| (v.chapter, v.number.clone(), v.title)).collect::<Vec<_>>();
+    let untitled = |vs: &[Verse]| vs.iter().filter(|v| !v.title).map(|v| (v.chapter, v.number.clone())).collect::<Vec<_>>();
+    let empty = |v: &Verse| !v.title && v.text.trim().is_empty();
+    for book in kjv_library::books::BOOKS {
+        let code = book.code;
+        let Some(native) = verses(&b.id, code, &b.heading_markers) else { continue };
+        total += native.len();
+        let mut row = |v: &Verse, kjv: &[(String, u32, String)], how: &str, score: Option<f32>| {
+            // The same-numbered verse alone needs no row
+            if let [(k, c, n)] = kjv
+                && k == code
+                && *c == v.chapter
+                && *n == v.number
+            {
+                return;
+            }
+            *counts.entry(how.to_string()).or_default() += 1;
+            let there: Vec<String> = kjv.iter().map(|(k, c, n)| format!("{} {}", k, reference(*c, n))).collect();
+            let there = if there.is_empty() { "-".to_string() } else { there.join("+") };
+            let score = score.map_or("-".to_string(), |s| format!("{:.2}", s));
+            writeln!(rows, "{}\t{}\t{}\t{}\t{}", code, reference(v.chapter, &v.number), there, how, score).unwrap();
+        };
+        let here = |v: &Verse| (code.to_string(), v.chapter, v.number.clone());
+        let reading: Vec<Option<&Vec<(String, u32, String)>>> = native.iter().map(|v| read.get(&here(v))).collect();
+        used.extend(native.iter().zip(&reading).filter(|(_, r)| r.is_some()).map(|(v, _)| here(v)));
+
+        // 2. As the English translation it was made from
+        if let Some(f) = follows
+            && verses(&f.id, code, &f.heading_markers).is_some_and(|theirs| shape(&theirs) == shape(&native))
+        {
+            let table = table_of(&f.id)?;
+            let how = format!("like {}", f.id);
+            for (v, r) in native.iter().zip(&reading) {
+                match r {
+                    Some(r) => row(v, r, "read", None),
+                    None => row(v, &table.to_kjv(&here(v), &kjv_has_ref), &how, None),
+                }
+            }
+            continue;
+        }
+
+        // 3. Placeholder verses: compared by content with another in its language
+        if let Some(other) = compared_with
+            && native.iter().any(empty)
+        {
+            let theirs = verses(&other.id, code, &other.heading_markers)
+                .ok_or_else(|| format!("{} {}: compared_with {} hasn't the book", b.id, code, other.id))?;
+            if theirs.iter().any(empty) {
+                return Err(format!("{} {}: compared_with {} has placeholder verses there too", b.id, code, other.id));
+            }
+            let table = table_of(&other.id)?;
+            let filled: Vec<Verse> = native.iter().filter(|v| !empty(v)).cloned().collect();
+            let theirs_of = |c: &str| if c == code { Some(theirs.clone()) } else { verses(&other.id, c, &other.heading_markers) };
+            let mut matched: HashMap<(u32, String), (Vec<(String, u32, String)>, How, f32)> = HashMap::new();
+            for g in align::align_book(code, &filled, &theirs_of) {
+                // Their verses, then the KJV's for each
+                let mut kjv: Vec<(String, u32, String)> = Vec::new();
+                for (k, c, n) in &g.kjv {
+                    for x in table.to_kjv(&(k.clone(), *c, n.clone()), &kjv_has_ref) {
+                        if !kjv.contains(&x) {
+                            kjv.push(x);
+                        }
+                    }
+                }
+                for (c, n) in &g.native {
+                    matched.insert((*c, n.clone()), (kjv.clone(), g.how, g.score));
+                }
+            }
+            for (v, r) in native.iter().zip(&reading) {
+                match (r, matched.get(&(v.chapter, v.number.clone()))) {
+                    (Some(r), _) => row(v, r, "read", None),
+                    (None, Some((kjv, how, score))) => row(v, kjv, &format!("{} {}", how_name(*how), other.id), Some(*score)),
+                    (None, None) => row(v, &[], "placeholder", None),
+                }
+            }
+            continue;
+        }
+
+        // 4. Numbered as the KJV: verse for verse
+        let same_book = align::kjv_books_for(code).is_some_and(|(primary, _)| primary == code);
+        let kjv_book = verses("kjv", code, kjv_markers).filter(|_| same_book);
+        // Chapters whose title the KJV prints on its own and this translation inside verse 1
+        // ("Salmo de David, cuando huía…" begins RV1909's Psalm 3:1)
+        let titled: HashSet<u32> = native.iter().filter(|v| v.title).map(|v| v.chapter).collect();
+        let in_verse_1: HashSet<u32> =
+            kjv_book.iter().flatten().filter(|v| v.title && !titled.contains(&v.chapter)).map(|v| v.chapter).collect();
+        let as_kjv: Vec<Option<Vec<(String, u32, String)>>> = native
+            .iter()
+            .map(|v| {
+                let mut refs = numbered(v);
+                if !v.title && in_verse_1.contains(&v.chapter) && refs.first().is_some_and(|r| r.1 == "1") {
+                    refs.insert(0, (v.chapter, "0".to_string(), true));
+                }
+                refs.into_iter().map(|(c, n, t)| kjv_has(code, c, &n, t).then(|| (code.to_string(), c, n))).collect()
+            })
+            .collect();
+        let by_number = |row: &mut dyn FnMut(&Verse, &[(String, u32, String)], &str, Option<f32>)| {
+            for ((v, kjv), r) in native.iter().zip(&as_kjv).zip(&reading) {
+                match (r, kjv) {
+                    (Some(r), _) => row(v, r, "read", None),
+                    (None, Some(kjv)) if same_book => row(v, kjv, "number", None),
+                    _ => row(v, &[], "unmatched", None),
+                }
+            }
+        };
+        let titles_known = native.iter().zip(&as_kjv).zip(&reading).all(|((v, k), r)| !v.title || k.is_some() || r.is_some());
+        if kjv_book.as_ref().is_some_and(|k| untitled(k) == untitled(&native)) && titles_known {
+            by_number(&mut row);
+            continue;
+        }
+
+        // 5. As an English translation numbered exactly the same way
+        if let Some(twin) = english.iter().find(|e| verses(&e.id, code, &e.heading_markers).is_some_and(|theirs| shape(&theirs) == shape(&native))) {
+            let table = table_of(&twin.id)?;
+            let how = format!("like {}", twin.id);
+            for (v, r) in native.iter().zip(&reading) {
+                match r {
+                    Some(r) => row(v, r, "read", None),
+                    None => row(v, &table.to_kjv(&here(v), &kjv_has_ref), &how, None),
+                }
+            }
+            continue;
+        }
+
+        // 6. Bridged verses and verses left out keep the KJV's numbers; anything else is
+        // matched as far as the numbers go, and reported
+        if !(same_book && as_kjv.iter().zip(&reading).all(|(k, r)| k.is_some() || r.is_some())) {
+            unsure.push(code);
+        }
+        by_number(&mut row);
+    }
+    if let Some((book, c, n)) = read.keys().find(|k| !used.contains(*k)) {
+        return Err(format!("bibles.toml: {} counterparts: {} has no verse {}:{}", b.id, book, c, n));
+    }
+    if !unsure.is_empty() {
+        eprintln!("{}: numbered unlike the KJV and every English translation, matched by number where it can be: {}", b.id, unsure.join(" "));
+    }
+    let listed: usize = counts.values().sum();
+    let mut out = String::new();
+    writeln!(out, "# Generated by kjv-import from data/library/bibles/{} and the KJV. Do not edit.", b.id).unwrap();
+    writeln!(out, "# The verses of this translation whose KJV counterpart is not the KJV verse with the same").unwrap();
+    writeln!(out, "# book, chapter, and number. Its words can't be compared with the KJV's, so (see").unwrap();
+    writeln!(out, "# crates/import/src/align.rs, by_numbers) its verses are matched by their numbers").unwrap();
+    writeln!(out, "# (\"number\": a bridged verse stands for its range); as an English translation numbered").unwrap();
+    writeln!(out, "# the same way, or the one it was made from, was matched by content (\"like <id>\"); by").unwrap();
+    writeln!(out, "# content with another in its language where placeholder verses show its text divided").unwrap();
+    writeln!(out, "# otherwise (\"content <id>\", …); or by reading them (\"read\", in data/library/bibles.toml).").unwrap();
+    writeln!(out, "# Every verse not listed corresponds to its same-numbered KJV verse, where the KJV has one.").unwrap();
+    writeln!(out, "# Columns: book, verses here, KJV verses (\"-\": none), how matched, similarity (by content only).").unwrap();
+    writeln!(
+        out,
+        "# {} verses, {} listed: {}",
+        total,
+        listed,
+        counts.iter().map(|(k, v)| format!("{} {}", k, v)).collect::<Vec<_>>().join(", ")
+    )
+    .unwrap();
+    Ok(out + &rows)
+}
+
 pub fn build(ids: &[String], mode: Mode) -> Result<(), String> {
     let all = catalogue()?;
     let kjv_markers = all.iter().find(|b| b.id == "kjv").map(|b| b.heading_markers.clone()).unwrap_or_default();
     let dir = library().join("alignment");
     let mut problems = Vec::new();
-    for b in all.iter().filter(|b| b.id != "kjv" && (ids.is_empty() || ids.contains(&b.id))) {
-        let text = table(&b.id, &b.heading_markers, &kjv_markers)?;
+    // English first: the others may be matched through an English translation's table
+    let mut chosen: Vec<&Entry> = all.iter().filter(|b| b.id != "kjv" && (ids.is_empty() || ids.contains(&b.id))).collect();
+    // (and those compared with another in their language after it)
+    chosen.sort_by_key(|b| (b.language != "en", b.compared_with.is_some()));
+    for b in chosen {
+        let text = if b.language == "en" { table(&b.id, &b.heading_markers, &kjv_markers)? } else { by_numbers(b, &all, &kjv_markers)? };
         let path = dir.join(format!("{}.tsv", b.id));
         match mode {
             Mode::Write => {
                 fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 fs::write(&path, &text).map_err(|e| e.to_string())?;
-                println!("{:<11} {}", b.id, text.lines().nth(5).unwrap_or("").trim_start_matches("# "));
+                println!("{:<11} {}", b.id, text.lines().find(|l| l.contains(" listed: ")).unwrap_or("").trim_start_matches("# "));
             }
             Mode::Check => match fs::read_to_string(&path) {
                 Ok(disk) if disk.replace("\r\n", "\n") == text => {}
@@ -105,4 +359,15 @@ pub fn build(ids: &[String], mode: Mode) -> Result<(), String> {
         }
     }
     if problems.is_empty() { Ok(()) } else { Err(problems.join("\n")) }
+}
+
+/// `kjv-import compare <id> <other>`: translation `id` aligned by content with `other`
+/// (for review), printed.
+pub fn compare(args: &[String]) -> Result<(), String> {
+    let [id, other] = args else { return Err("usage: kjv-import compare <id> <other id>".into()) };
+    let all = catalogue()?;
+    let find = |x: &str| all.iter().find(|b| b.id == x).ok_or_else(|| format!("no translation {:?}", x));
+    let (a, b) = (find(id)?, find(other)?);
+    print!("{}", table_against(&a.id, &a.heading_markers, &b.id, &b.heading_markers)?);
+    Ok(())
 }

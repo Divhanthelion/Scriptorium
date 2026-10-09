@@ -1,6 +1,6 @@
 //! Text folded for searching: case and typography set aside, so "Moses’" finds
-//! "moses'", "Caesar" finds "Cæsar", and Greek typed with a keyboard's accents finds
-//! it printed with the polytonic ones.
+//! "moses'", "Caesar" finds "Cæsar", "corazon" finds "corazón", and Greek typed with a
+//! keyboard's accents finds it printed with the polytonic ones.
 
 /// Fold one char for case/typography-insensitive search.
 /// Curly apostrophes match straight ones and "æ" matches "ae" (Cæsar ↔ Caesar). Greek
@@ -24,7 +24,30 @@ pub fn fold_char(c: char, out: &mut String) {
         '\u{1FE3}' => out.push('\u{03B0}'),
         '\u{03C2}' => out.push('\u{03C3}'),
         c if c.is_whitespace() => out.push(' '),
-        c => out.extend(c.to_lowercase()),
+        c => out.extend(c.to_lowercase().map(unaccented)),
+    }
+}
+
+/// A Latin letter without its accent, so "corazon" finds "corazón", "coracao" finds
+/// "coração", and "Elohim" finds "Elohîm" (lower case in, lower case out). Letters such
+/// as "ø" and "ß" are letters of their own, not accented ones, and stay.
+fn unaccented(c: char) -> char {
+    match c {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => 'a',
+        'ç' | 'ć' | 'č' => 'c',
+        'ď' => 'd',
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' => 'e',
+        'ğ' => 'g',
+        'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' => 'i',
+        'ñ' | 'ń' | 'ň' => 'n',
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ō' | 'ŏ' | 'ő' => 'o',
+        'ř' => 'r',
+        'ś' | 'š' | 'ş' => 's',
+        'ť' | 'ţ' => 't',
+        'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' => 'u',
+        'ý' | 'ÿ' => 'y',
+        'ź' | 'ż' | 'ž' => 'z',
+        c => c,
     }
 }
 
@@ -92,6 +115,19 @@ mod tests {
         assert_eq!(fold("\u{1FF9}"), fold("\u{038C}"));
         let text = "\u{03BB}\u{1F79}\u{03B3}\u{03BF}\u{03C2}";
         assert_eq!(find_folded(text, "\u{039B}\u{038C}\u{0393}\u{039F}\u{03A3}"), [(0, text.len())]);
+    }
+
+    #[test]
+    fn latin_accents_set_aside() {
+        assert_eq!(fold("Corazón"), "corazon");
+        assert_eq!(fold("CORAÇÃO"), "coracao");
+        assert_eq!(fold("Año, pingüino"), "ano, pinguino");
+        assert_eq!(fold("Elohîm"), "elohim");
+        let text = "Bienaventurados los de limpio corazón: porque ellos verán á Dios.";
+        let at = text.find("corazón").unwrap();
+        assert_eq!(find_folded(text, "CORAZON"), [(at, at + "corazón".len())]);
+        // Letters of their own, not accented ones
+        assert_eq!(fold("Ø ß"), "ø ß");
     }
 
     #[test]

@@ -2,9 +2,11 @@
 //!
 //! Translations number verses differently: the Douay-Rheims follows the Vulgate's
 //! Psalms, the Septuagint orders Jeremiah differently, Jewish editions count Psalm
-//! titles as verses, some translations join, split, swap, or leave out verses. Every
-//! text in the library is English, so a verse can be matched to its KJV counterpart
-//! by content: the distinctive words they share (names, numbers, rarer words).
+//! titles as verses, some translations join, split, swap, or leave out verses. An
+//! English translation's verse can be matched to its KJV counterpart by content: the
+//! distinctive words they share (names, numbers, rarer words). (Two translations in
+//! another language can be compared the same way; one can't be compared with the KJV,
+//! and is aligned by kjv-import's align::by_numbers.)
 //!
 //! Two stages:
 //! 1. [`align_blocks`] lines the verses up in order (a sequence alignment allowing

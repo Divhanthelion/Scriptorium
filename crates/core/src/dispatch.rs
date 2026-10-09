@@ -97,8 +97,10 @@ pub fn dispatch(data: &DataBundle, name: &str, args: Value) -> Result<Value, Str
                 Some(v) => api::copy_verse(data, &a.book, a.chapter, v),
                 None => api::copy_chapter(data, &a.book, a.chapter),
             };
-            text.map(|t| json!(t))
-                .ok_or_else(|| format!("no text for {} {}", a.book, a.chapter))
+            text.map(|t| json!(t)).ok_or_else(|| match a.verse {
+                Some(v) => format!("no text for {} {}:{}", a.book, a.chapter, v),
+                None => format!("no text for {} {}", a.book, a.chapter),
+            })
         }
         _ => Err(format!("unknown command {:?}", name)),
     }
@@ -123,6 +125,12 @@ pub fn dispatch_all(
         "bible_chapter" => {
             let a: BibleChapterArgs = parse(name, args)?;
             to_json(crate::translations::chapter(library, &a.bible, &a.book, a.chapter)?)
+        }
+        // The audio Bibles shipped with the app, and one chapter's recording and timings
+        "audio_recordings" => to_json(crate::audio::recordings()),
+        "audio_chapter" => {
+            let a: BibleChapterArgs = parse(name, args)?;
+            to_json(crate::audio::chapter(&a.bible, &a.book, a.chapter))
         }
         "commentaries" => to_json(library.commentaries()),
         "crossref_collections" => to_json(library.crossrefs()),

@@ -23,6 +23,9 @@ pub struct BibleInfo {
     pub name: String,
     pub year: String,
     pub group: String,
+    /// The text's language (BCP 47: "en", "es")
+    #[serde(default = "english")]
+    pub language: String,
     pub licence: String,
     pub credit: String,
     pub about: String,
@@ -32,6 +35,28 @@ pub struct BibleInfo {
     pub books: Vec<BookEntry>,
     pub chapters: usize,
     pub verses: usize,
+}
+
+fn english() -> String {
+    "en".to_string()
+}
+
+/// A language's name in English, for its code ("es": "Spanish").
+pub fn language_name(code: &str) -> &str {
+    match code {
+        "en" => "English",
+        "es" => "Spanish",
+        "pt" => "Portuguese",
+        "ka" => "Georgian",
+        other => other,
+    }
+}
+
+impl BibleInfo {
+    /// The name of its language when it isn't English ("Spanish").
+    pub fn other_language(&self) -> Option<&str> {
+        (self.language != "en").then(|| language_name(&self.language))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -437,6 +462,8 @@ pub mod build {
         name: String,
         year: String,
         group: String,
+        #[serde(default = "super::english")]
+        language: String,
         licence: String,
         credit: String,
         about: String,
@@ -496,6 +523,7 @@ pub mod build {
                 name: index.name,
                 year: index.year,
                 group: index.group,
+                language: index.language,
                 licence: index.licence,
                 credit: index.credit,
                 about: index.about,

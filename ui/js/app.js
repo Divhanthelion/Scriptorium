@@ -9,6 +9,7 @@ import { renderSearch } from "./search.js";
 import { initPicker, openPicker, setPickerBooks } from "./picker.js";
 import { libraryVerseText, markSelected, renderChapter, renderLibraryChapter, renderParallel } from "./reader.js";
 import { initTranslations, openTranslations } from "./translations.js";
+import { chapterShown, initListen, playFrom, syncVerseAction } from "./listen.js";
 import { notesStale, renderNotes } from "./notes.js";
 import { renderXrefs, xrefsStale } from "./xrefs.js";
 import * as prefs from "./settings.js";
@@ -135,14 +136,15 @@ async function goTo(book, chapter, verse = 0, opts = {}) {
   if (seq !== navSeq) return; // a later navigation won
 
   const changedChapter = state.chapter?.book !== book || state.chapter?.chapter !== chapter;
-  const anchor = opts.keepScroll ? firstVisibleVerse() : null;
+  const place = opts.keepScroll ? readingPlace() : null;
   state.chapter = view;
   const target = verse > 0 && hasVerse(view, verse) ? verse : null;
   state.selectedVerse = opts.select === false ? null : target;
   render();
 
-  if (target && !opts.top) scrollToVerse(target);
-  else if (anchor !== null) scrollToVerse(anchor);
+  // keepScroll (a search re-highlighting the chapter) stays put, even with a verse selected
+  if (target && !opts.top && !opts.keepScroll) scrollToVerse(target);
+  else if (place) returnTo(place);
   else if (changedChapter || opts.top) reader.scrollTop = 0;
 
   settings.position = { book, chapter, verse: target ?? 1 };
@@ -182,6 +184,9 @@ function render() {
   $("next-chapter").disabled = !view.next;
   document.title = `${view.heading} (${translationAbbr()}) · ${APP.name}`;
   updateActions();
+  chapterShown();
+  // The chapter is in the page now (Android CI waits for this line in logcat)
+  console.log("kjv:ready", view.book, view.chapter);
 }
 
 function step(direction) {
@@ -193,13 +198,28 @@ function scrollToVerse(n) {
   reader.querySelector(`#v${n}`)?.scrollIntoView({ block: "start" });
 }
 
-/** The verse at the top of the reading pane, to keep the place when the layout changes. */
-function firstVisibleVerse() {
+/** The verse at the top of the reading pane, and how far its top is from the pane's. */
+function readingPlace() {
   const top = reader.getBoundingClientRect().top;
   for (const el of reader.querySelectorAll(".verse")) {
-    if (el.getBoundingClientRect().bottom > top + 8) return Number(el.dataset.verse);
+    const box = el.getBoundingClientRect();
+    if (box.bottom > top + 8) return { verse: Number(el.dataset.verse), offset: box.top - top };
   }
   return null;
+}
+
+/** The verse at the top of the reading pane, to keep the place when the layout changes. */
+function firstVisibleVerse() {
+  return readingPlace()?.verse ?? null;
+}
+
+/**
+ * Put the reader back exactly where it was. (Scrolling the verse into view instead would
+ * creep up a verse each time: the scroll padding leaves the one above peeking in.)
+ */
+function returnTo(place) {
+  const el = reader.querySelector(`#v${place.verse}`);
+  if (el) reader.scrollTop += el.getBoundingClientRect().top - reader.getBoundingClientRect().top - place.offset;
 }
 
 /** Re-render in place (view change), keeping the reader on the same verse. */
@@ -251,6 +271,7 @@ function updateActions() {
   bookmark.setAttribute("aria-pressed", String(saved));
   replace(bookmark, icon(saved ? "bookmarkFilled" : "bookmark"), h("span", { class: "action-label" }, saved ? "Saved" : "Bookmark"));
   bookmark.title = saved ? "Remove bookmark (Ctrl+B)" : "Bookmark (Ctrl+B)";
+  syncVerseAction();
 }
 
 async function copyVerse(n = state.selectedVerse) {
@@ -399,7 +420,10 @@ function syncNavState() {
 }
 
 function openStrongs(key) {
-  state.strongs.query = key.replace(/^([HG])0+(?=\d)/, "$1");
+  // The box shows the plain number; the word's sense code (H0430G) still
+  // drives the first lookup, so the lexicon opens at that word's own sense
+  state.strongs.query = key.replace(/^([HG])0*(\d+)[A-Z]?$/, "$1$2");
+  state.strongs.lookupKey = key;
   state.strongs.pending = true;
   openPanel("strongs", { focus: desktop.matches });
 }
@@ -419,6 +443,7 @@ const ctx = {
   setHighlight,
   refreshPanel,
   openPanel,
+  updateActions,
   toast,
   changeSettings(mutator) {
     const before = settings.view;
@@ -638,14 +663,10 @@ function onKeydown(event) {
     return;
   }
 
-  if (mod && key === "f") {
+  if (mod && (key === "f" || key === "j")) {
     event.preventDefault();
-    openPanel("search");
-    return;
-  }
-  if (mod && key === "j") {
-    event.preventDefault();
-    if (state.panel === "chat") closePanel();
+    if (key === "f") openPanel("search");
+    else if (state.panel === "chat") closePanel();
     else openPanel("chat");
     return;
   }
@@ -744,16 +765,17 @@ function wireStaticControls() {
     });
   }
 
-  const actionIcons = { notes: ["notes", "Commentary"], xrefs: ["link", "Cross-refs"], "copy-verse": ["copy", "Copy"], "copy-chapter": ["chapter", "Copy chapter"] };
+  const actionIcons = { listen: ["play", "Listen"], notes: ["notes", "Commentary"], xrefs: ["link", "Cross-refs"], "copy-verse": ["copy", "Copy"], "copy-chapter": ["chapter", "Copy chapter"] };
   for (const [action, [iconName, label]] of Object.entries(actionIcons)) {
     const b = actions.querySelector(`[data-action="${action}"]`);
     b.append(icon(iconName), h("span", { class: "action-label" }, label));
-    b.title = { notes: "Commentary on this verse", xrefs: "Cross-references for this verse", "copy-verse": "Copy verse (Ctrl+C)", "copy-chapter": "Copy chapter (Ctrl+Shift+C)" }[action];
+    b.title = { listen: "Listen from this verse", notes: "Commentary on this verse", xrefs: "Cross-references for this verse", "copy-verse": "Copy verse (Ctrl+C)", "copy-chapter": "Copy chapter (Ctrl+Shift+C)" }[action];
   }
   actions.querySelector('[data-action="deselect"]').append(icon("close"));
   actions.addEventListener("click", (event) => {
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (action === "bookmark") toggleBookmark();
+    else if (action === "listen") playFrom(state.selectedVerse);
     else if (action === "notes" || action === "xrefs") openPanel(action, { focus: false });
     else if (action === "copy-verse") copyVerse();
     else if (action === "copy-chapter") copyChapter();
@@ -798,14 +820,18 @@ async function start() {
     window.addEventListener("resize", syncAndroidInsets);
   }
   wireStaticControls();
+  initListen(ctx);
   try {
-    const [loaded, books, bibles, version] = await Promise.all([
-      prefs.load(),
+    const [books, bibles, version] = await Promise.all([
       call("books"),
       call("bibles"),
       window.__TAURI__?.app?.getVersion?.().catch(() => null) ?? null,
+      // Taken as soon as it's read, even if the books fail: from then on the window
+      // closing saves these, never the defaults
+      prefs.load().then((loaded) => {
+        settings = loaded;
+      }),
     ]);
-    settings = loaded;
     ctx.version = version;
     state.kjvBooks = books;
     state.bibles = bibles;
@@ -818,7 +844,7 @@ async function start() {
   const preview = previewParams();
   if (preview) applyPreviewSettings(preview);
   prefs.apply(settings);
-  if (prefs.loadError) toast("Couldn’t read your settings, so they’re left as they were: changes now won’t be saved", 8000);
+  if (!prefs.isLoaded()) toast("Couldn’t read your settings, so changes won’t be saved this time", 8000);
   buildViewSwitches();
   syncNavState();
   initPicker(state.books, (book, chapter) => goTo(book, chapter, 0, { top: true }));
