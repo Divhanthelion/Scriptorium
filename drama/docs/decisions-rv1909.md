@@ -26,10 +26,30 @@ writers, one Fish request per chapter, three transcription passes and a person's
 | E10 | Chapter announcements from the edition's short book names, numbers in words ("Primero de Samuel, capítulo veintiuno."); no long titles | eBible's RV1909 has only short titles, and titles are taken from the edition, not typed |
 | E11 | **Names with a circumflex** (Achâb, Ezechîas, Mardochêo: the RV1909's mark that "ch" is a k sound) are respelled for the voice only (Acáb, Ezequías, Mardoquéo); the script and the app keep the RV1909's spelling (`lexicon/rv1909.tsv`, checked on the name reel) | a Spanish voice reads "ch" as in "mucho" |
 
+## The pilot (2026-10-09): Genesis 3
+
+Five stand-in voices (the owner picks the real ones), one chapter, rendered and
+transcribed in Spanish (Whisper medium, every difference heard again by large-v3).
+
+- Fish heard all 20 candidates as Spanish with a neutral Latin American accent; each
+  sample clip says its line exactly.
+- **Stray words at a change of speaker.** In 4 of 9 renders of the chapter, a voice
+  added a few nonsense words ("Manirana Sediru") just as a new speaker began: never
+  the same place twice. Rendering in halves, a calmer temperature, or a line break
+  before each speaker didn't prevent it (the KJV's checks report it rarely: 22
+  insertions in 429 chapters). Each was caught by the transcription check and gone
+  when that scene was rendered again. So for the RV1909 the check runs on every
+  chapter and a scene with confirmed stray words is rendered again (E12).
+- The final pilot: 601 words, every one heard; nothing added; the remaining
+  differences are spelling ("con que" for "conque").
+
+| # | Decision | Why |
+|---|---|---|
+| E12 | Every chapter is transcribed after rendering; a scene with stray words the second model confirms is rendered again before the chapter is kept | measured in the pilot; nothing else prevented it |
+
 ## Open: for the owner
 
-1. **The pilot.** Genesis 3 with five designed voices, before the cast is designed
-   at scale: does the Spanish sound right?
+1. **The pilot.** Genesis 3 (`.cache/out/rv1909/GEN.3.mp3`): does the Spanish sound right?
 2. **API credit** for about 900 voices (~$10–$30), after the pilot.
 3. **The casting session**: the 125 principal voices in Spanish.
 4. **The review list**: `script/rv1909/review.json`, 422 verses (78 P1 for a person,
