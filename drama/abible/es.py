@@ -17,15 +17,25 @@ _ORDINAL_F = {"1": "Primera", "2": "Segunda", "3": "Tercera"}
 _LETTERS = {"1CO", "2CO", "1TH", "2TH", "1TI", "2TI", "1PE", "2PE", "1JN", "2JN", "3JN"}
 
 
+_HUNDREDS = ("_ ciento doscientos trescientos cuatrocientos quinientos seiscientos setecientos "
+             "ochocientos novecientos").split()
+
+
 def number_words(n: int) -> str:
-    """150 -> 'ciento cincuenta'; 21 -> 'veintiuno' (as a chapter is counted)."""
+    """150 -> 'ciento cincuenta'; 21 -> 'veintiuno' (as a chapter is counted); 2300 ->
+    'dos mil trescientos' (the recognizer writes the RV1909's numbers as digits)."""
     if n < 30:
         return _UNITS[n]
     if n < 100:
         return _TENS[n // 10] + ("" if n % 10 == 0 else " y " + _UNITS[n % 10])
     if n == 100:
         return "cien"
-    return "ciento " + number_words(n - 100) if n < 200 else str(n)
+    if n < 1000:
+        return _HUNDREDS[n // 100] + ("" if n % 100 == 0 else " " + number_words(n % 100))
+    if n < 1_000_000:
+        thousands = "mil" if n // 1000 == 1 else number_words(n // 1000).replace("uno", "un") + " mil"
+        return thousands + ("" if n % 1000 == 0 else " " + number_words(n % 1000))
+    return str(n)
 
 
 def book_name(code: str, translation: str = "rv1909") -> str:

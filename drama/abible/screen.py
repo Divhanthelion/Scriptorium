@@ -68,8 +68,22 @@ def pitch_problem(entry, hz) -> str | None:
     return None
 
 
+# Spanish letters as the recognizer may write a word that sounds like one: "Heme aquí"
+# (the h is silent) came back "M aquí" from every candidate that said it
+SPANISH_LETTERS = {"m": "eme", "n": "ene", "l": "ele", "s": "ese", "f": "efe", "r": "erre", "c": "ce", "d": "de",
+                   "t": "te", "b": "be", "p": "pe", "v": "uve", "k": "ka", "j": "jota", "g": "ge", "x": "equis"}
+
+
 def _words(text):
-    return [qa.norm(w) for w in re.sub(r"[-—]", " ", text).split() if qa.norm(w)]
+    words = [qa.norm(w) for w in re.sub(r"[-—]", " ", text).split() if qa.norm(w)]
+    if paths.LANGUAGE == "es":  # sounds, not spellings: a silent h, a letter's name, a number
+        from .es import number_words
+        said = []
+        for w in words:  # "2300" -> "dos mil trescientos", as the RV1909 writes it
+            said += [qa.norm(x) for x in number_words(int(w)).split()] if w.isdigit() and len(w) < 7 else [w]
+        words = [{"etc": "etcetera"}.get(SPANISH_LETTERS.get(w, w), SPANISH_LETTERS.get(w, w)) for w in said]
+        words = [w[1:] if w.startswith("h") and len(w) > 1 else w for w in words]
+    return words
 
 
 def _brief_voice(entry) -> str:
