@@ -13,8 +13,8 @@ permissions:
 # The 1769 source the KJV files were made from, pinned so an eBible.org outage
 # or an upstream change fails distinctly instead of breaking every PR.
 env:
-  KJV_VPL_SHA256: 3c611764ee4c66248681f83f1ce5689e77a9c50a590fc3241584259c1b9183b5
-  KJV_USFM_SHA256: 0e0359e9e488582a72c86800f227839ecb16dada7bb5ba316509d374c59e559a
+  KJV_VPL_SHA256: 970b0564b6816737928ebfb2fec910b96586e242c6311927f3b6c507b76418f3
+  KJV_USFM_SHA256: 80bb0add46d3a648e6f68239d2721c259df23e3f247065bb12f2819c8c23728d
 
 jobs:
   test:
