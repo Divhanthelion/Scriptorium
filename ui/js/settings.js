@@ -13,6 +13,9 @@ export const VIEWS = [
 export const TEXT_SCALES = [0.85, 0.92, 1, 1.1, 1.2, 1.35, 1.5, 1.7];
 export const ORIG_SCALES = [1, 1.15, 1.3, 1.45, 1.6];
 
+/** Playback speeds the audio Bibles offer. */
+export const AUDIO_SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+
 export const DEFAULTS = {
   theme: "system", // system | light | dark
   textScale: 1,
@@ -28,6 +31,8 @@ export const DEFAULTS = {
   // Where Search looks: the translation being read, the chosen translations and
   // commentaries, or everything
   search: { in: "reading", translations: [], commentaries: [] },
+  // The audio Bibles: how fast they read, and whether the page follows the verse being read
+  audio: { speed: 1, follow: true },
   verseNumbers: true,
   redLetter: true,
   translit: true,
@@ -198,6 +203,10 @@ export function sanitize(raw) {
       in: oneOf(s.search?.in, ["reading", "chosen", "everything"], DEFAULTS.search.in),
       translations: idList(s.search?.translations) ?? [],
       commentaries: idList(s.search?.commentaries) ?? [],
+    },
+    audio: {
+      speed: oneOf(s.audio?.speed, AUDIO_SPEEDS, DEFAULTS.audio.speed),
+      follow: typeof s.audio?.follow === "boolean" ? s.audio.follow : DEFAULTS.audio.follow,
     },
     verseNumbers: bool("verseNumbers"),
     redLetter: bool("redLetter"),

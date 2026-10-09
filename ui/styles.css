@@ -1469,3 +1469,55 @@ details.note > summary { cursor: pointer; min-height: 32px; display: list-item; 
 .nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A single word wider than a small screen at the largest sizes breaks rather than overflowing */
 .verse-text, .orig-text { overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------ audio Bibles */
+
+.listen-button.is-playing { color: var(--accent); background: var(--accent-soft); }
+
+/* The verse being read */
+.verse.is-heard { background: var(--accent-soft); border-radius: 6px; }
+
+.player {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + var(--safe-bottom));
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 24px));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 6px 8px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 4;
+}
+.player[hidden] { display: none; }
+.player-controls { display: flex; align-items: center; }
+.player-play { color: var(--accent); }
+.player-what { display: flex; flex-direction: column; min-width: 0; padding-inline: 4px; }
+.player-title { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-sub { font-size: 0.8125rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.player-speed {
+  min-width: 52px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.player-speed:hover { background: var(--surface-2); color: var(--text); }
+.player-seek { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--accent); }
+
+/* Room for the player: the verse bar sits above it, and the last verse can scroll clear */
+.app[data-player="open"] .verse-actions { bottom: calc(16px + 96px + var(--safe-bottom)); }
+.app[data-player="open"] .reader { padding-bottom: calc(230px + var(--safe-bottom)); }
+@media (max-width: 899px) {
+  .player { bottom: calc(76px + var(--safe-bottom)); }
+  .app[data-player="open"] .verse-actions { bottom: calc(76px + 96px + var(--safe-bottom)); }
+}
+.translation-audio { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 0.8125rem; color: var(--accent); }
+.translation-audio .icon { width: 16px; height: 16px; }

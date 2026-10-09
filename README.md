@@ -10,6 +10,7 @@ A library for reading and studying the Bible: 44 English translations, commentar
 
 - **44 English translations**, from Wycliffe's and Tyndale's through the Geneva, the KJV, the Douay-Rheims, and Brenton's Septuagint to the World English Bible and the Berean Standard Bible, each checked character for character against its source
 - **Commentaries**: Matthew Henry, John Gill, Jamieson-Fausset-Brown, Keil & Delitzsch, Wesley's Notes, Aquinas's Catena Aurea, the Tyndale Open Study Notes with their profiles and articles, and the Fathers: Chrysostom's homilies and Augustine's expositions and tractates, each placed on the passage it expounds
+- **Audio Bibles**: the Berean Standard Bible read by Bob Souer and the World English Bible read by Winfred W. Henson, built into the app (nothing is downloaded): play any chapter, start at any verse, and follow along as each verse is marked
 - **Cross-references**: the Treasury of Scripture Knowledge and OpenBible.info's, with each place's words in the translation you're reading
 - **The Hebrew, Aramaic, and Greek** behind the KJV, word by word, with transliteration, Strong's number, grammar, and gloss, and the lexicon entry for any word
 

@@ -9,6 +9,7 @@ import { renderSearch } from "./search.js";
 import { initPicker, openPicker, setPickerBooks } from "./picker.js";
 import { libraryVerseText, markSelected, renderChapter, renderLibraryChapter, renderParallel } from "./reader.js";
 import { initTranslations, openTranslations } from "./translations.js";
+import { chapterShown, initListen, playFrom, syncVerseAction } from "./listen.js";
 import { notesStale, renderNotes } from "./notes.js";
 import { renderXrefs, xrefsStale } from "./xrefs.js";
 import * as prefs from "./settings.js";
@@ -183,6 +184,7 @@ function render() {
   $("next-chapter").disabled = !view.next;
   document.title = `${view.heading} (${translationAbbr()}) · ${APP.name}`;
   updateActions();
+  chapterShown();
   // The chapter is in the page now (Android CI waits for this line in logcat)
   console.log("kjv:ready", view.book, view.chapter);
 }
@@ -269,6 +271,7 @@ function updateActions() {
   bookmark.setAttribute("aria-pressed", String(saved));
   replace(bookmark, icon(saved ? "bookmarkFilled" : "bookmark"), h("span", { class: "action-label" }, saved ? "Saved" : "Bookmark"));
   bookmark.title = saved ? "Remove bookmark (Ctrl+B)" : "Bookmark (Ctrl+B)";
+  syncVerseAction();
 }
 
 async function copyVerse(n = state.selectedVerse) {
@@ -762,16 +765,17 @@ function wireStaticControls() {
     });
   }
 
-  const actionIcons = { notes: ["notes", "Commentary"], xrefs: ["link", "Cross-refs"], "copy-verse": ["copy", "Copy"], "copy-chapter": ["chapter", "Copy chapter"] };
+  const actionIcons = { listen: ["play", "Listen"], notes: ["notes", "Commentary"], xrefs: ["link", "Cross-refs"], "copy-verse": ["copy", "Copy"], "copy-chapter": ["chapter", "Copy chapter"] };
   for (const [action, [iconName, label]] of Object.entries(actionIcons)) {
     const b = actions.querySelector(`[data-action="${action}"]`);
     b.append(icon(iconName), h("span", { class: "action-label" }, label));
-    b.title = { notes: "Commentary on this verse", xrefs: "Cross-references for this verse", "copy-verse": "Copy verse (Ctrl+C)", "copy-chapter": "Copy chapter (Ctrl+Shift+C)" }[action];
+    b.title = { listen: "Listen from this verse", notes: "Commentary on this verse", xrefs: "Cross-references for this verse", "copy-verse": "Copy verse (Ctrl+C)", "copy-chapter": "Copy chapter (Ctrl+Shift+C)" }[action];
   }
   actions.querySelector('[data-action="deselect"]').append(icon("close"));
   actions.addEventListener("click", (event) => {
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (action === "bookmark") toggleBookmark();
+    else if (action === "listen") playFrom(state.selectedVerse);
     else if (action === "notes" || action === "xrefs") openPanel(action, { focus: false });
     else if (action === "copy-verse") copyVerse();
     else if (action === "copy-chapter") copyChapter();
@@ -816,6 +820,7 @@ async function start() {
     window.addEventListener("resize", syncAndroidInsets);
   }
   wireStaticControls();
+  initListen(ctx);
   try {
     const [books, bibles, version] = await Promise.all([
       call("books"),

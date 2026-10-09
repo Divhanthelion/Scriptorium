@@ -81,6 +81,8 @@ jobs:
         with:
           node-version: 22
       - run: cargo build --release -p kjv-devserver
+      # One recording of the audio Bibles for the player's tests (the rest aren't in git)
+      - run: mkdir -p app/audio/bsb-souer && cp tests/ui/fixtures/audio/bsb-souer/3JN.1.ogg app/audio/bsb-souer/
       - name: Start the preview server and a stand-in model
         run: |
           python3 tests/ui/mock_llm.py 8765 &

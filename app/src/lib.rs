@@ -1,5 +1,6 @@
 //! Scriptorium: serves the web UI in `../ui` and answers its commands.
 
+mod audio;
 mod secrets;
 
 use std::collections::HashMap;
@@ -231,6 +232,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        // The audio Bibles' chapter files (src/audio.rs), read off the UI thread
+        .register_asynchronous_uri_scheme_protocol("audio", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || responder.respond(audio::handle(&app, &request)));
+        })
         .setup(|app| {
             // Decompress the data while the window loads
             std::thread::spawn(|| {

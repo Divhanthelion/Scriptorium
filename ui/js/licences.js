@@ -1,7 +1,7 @@
 // The Licences page: everything the app carries and the terms it comes under, the same
 // as NOTICE and THIRD-PARTY-SOFTWARE.md (both written by `kjv-import notices`).
 
-import { openExternal } from "./backend.js";
+import { call, openExternal } from "./backend.js";
 import { APP, LICENCE_TEXT } from "./brand.js";
 import { loadCatalogues } from "./context.js";
 import { h, icon, plural, replace } from "./dom.js";
@@ -9,6 +9,7 @@ import { h, icon, plural, replace } from "./dom.js";
 /** What each licence is called, where it is, and what it asks (as in NOTICE) */
 const LICENCES = [
   ["pd", "Public domain", null, "Free of copyright: no conditions."],
+  ["cc0", "CC0 1.0", "https://creativecommons.org/publicdomain/zero/1.0/", "Dedicated to the public domain: no conditions."],
   ["cc-by-4.0", "CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/", "Free to share and adapt, with credit and a note of any changes."],
   ["cc-by-sa-4.0", "CC BY-SA 4.0", "https://creativecommons.org/licenses/by-sa/4.0/", "Free to share and adapt, with credit and a note of any changes; adaptations under the same licence."],
   ["cc-by-nd-4.0", "CC BY-ND 4.0", "https://creativecommons.org/licenses/by-nd/4.0/", "Free to share unaltered, with credit."],
@@ -125,6 +126,15 @@ export async function openLicences(ctx) {
   const bibles = ctx.state.bibles.map((b) => ({ licence: b.licence, title: `${b.abbr} · ${b.name}, ${b.year}`, credit: b.credit }));
   const commentaries = known.commentaries.map((c) => ({ licence: c.licence, title: `${c.name} · ${c.author} (${c.year})`, credit: c.credit }));
   const crossrefs = known.crossrefs.map((c) => ({ licence: c.licence, title: c.name, credit: c.credit }));
+  // The audio Bibles: who reads them, for which translation
+  let recordings = [];
+  let audioMissing = null;
+  try {
+    const abbr = (id) => ctx.state.bibles.find((b) => b.id === id)?.abbr ?? id.toUpperCase();
+    recordings = (await call("audio_recordings")).map((r) => ({ licence: r.licence, title: `${r.bibles.map(abbr).join(", ")} · read by ${r.reader}`, credit: r.credit }));
+  } catch (error) {
+    audioMissing = String(error.message ?? error);
+  }
   const softwareBox = h("div", { class: "licence-software" }, h("button", { type: "button", class: "button", onclick: () => softwareList(softwareBox) }, "Show the packages and their licences"));
   replace(
     body,
@@ -137,6 +147,7 @@ export async function openLicences(ctx) {
       h("p", { class: "small muted" }, "Everything below comes with it under its own terms, which that licence doesn’t change."),
     ),
     works("Bible translations", bibles),
+    recordings.length || audioMissing ? works("Audio Bibles", recordings, audioMissing) : null,
     works("Commentaries", commentaries, missing),
     works("Cross-references", crossrefs, missing),
     h(
