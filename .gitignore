@@ -32,3 +32,6 @@ screens/
 
 # The audio Bibles themselves (see app/audio/README.md)
 /app/audio/*/
+/drama/.cache/
+/drama/.env
+/drama/**/__pycache__/
