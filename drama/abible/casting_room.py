@@ -48,6 +48,10 @@ def page(everyone=False) -> str:
             f = c.get("heard_as") or {}
             heard = ", ".join(x for x in (f.get("age"), f.get("tone"), f.get("accent")) if x)
             warn = "".join(f'<span class="warn">{html.escape(p)}</span>' for p in s.get("problems", []))
+            bw = s.get("bandwidth")
+            if bw and not any(p.startswith("muffled") for p in s.get("problems", [])):
+                # how full the clip sounds: the voice will sound like it (screen.bandwidth)
+                warn += f'<span class="{"warn" if bw < 7000 else "new"}">{"dull, " if bw < 7000 else ""}{bw / 1000:.1f} kHz</span>'
             nn = near.get(f"{key}|{c['file']}")
             close = ""
             if nn and nn[1] >= 0.6:

@@ -69,7 +69,8 @@ def design(key: str, n: int = 4, seed: int | None = None, new_line=False, guidan
     used = {c["reference_text"] for c in candidates(key)}
     line = line or reference_line(entry, exclude=used if new_line else ())  # a line chosen by a person, if given
     prompt = instruction(entry)
-    cands = fish.design(prompt, line, n=n, seed=seed, guidance_scale=guidance)
+    extra = castmod.policy().get("design", {})  # the Spanish cast: 64 steps
+    cands = fish.design(prompt, line, n=n, seed=seed, guidance_scale=guidance, num_step=extra.get("num_step"))
     batch = len(list(out.glob("batch-*.json"))) + len(list(out.glob("superseded-batch-*.json")))  # never reuse a file name
     saved = []
     for c in cands:
@@ -251,3 +252,37 @@ def audition_page(keys: list) -> str:
     page = paths.VOICES / "audition.html"
     page.write_text(html, encoding="utf-8")
     return str(page)
+
+
+def design_all(workers: int = 4) -> dict:
+    """Candidates for every character who has none yet, in order of how much they
+    say, `workers` at a time (the account allows 5 requests at once). Resumable: a
+    character with candidates is skipped. Progress: .cache/voices/<bible>/design.log."""
+    import concurrent.futures as cf
+    import time
+    entries = castmod.load()
+    todo = [k for k, e in sorted(entries.items(), key=lambda kv: -kv[1]["words"])
+            if not e.get("voice_of") and not candidates(k)]
+    paths.ensure(paths.VOICES)
+    log = paths.VOICES / "design.log"
+    done, failed = 0, {}
+
+    def one(key):
+        for attempt in range(3):
+            try:
+                return key, design(key), None
+            except Exception as e:  # noqa: BLE001 - logged and reported
+                err = str(e)
+                time.sleep(5 * (attempt + 1))
+        return key, None, err
+
+    with cf.ThreadPoolExecutor(workers) as ex, open(log, "a", encoding="utf-8") as f:
+        for key, cands, err in ex.map(one, todo):
+            if cands:
+                done += 1
+                f.write(f"{time.strftime('%H:%M:%S')} {done}/{len(todo)} {key}\n")
+            else:
+                failed[key] = err
+                f.write(f"{time.strftime('%H:%M:%S')} FAILED {key}: {err}\n")
+            f.flush()
+    return {"designed": done, "of": len(todo), "failed": failed}

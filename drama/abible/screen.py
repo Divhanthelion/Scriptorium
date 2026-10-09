@@ -37,6 +37,23 @@ def pitch(pcm, rate=16000) -> float | None:
     return float(np.median(out)) if out else None
 
 
+MUFFLED_HZ = 6000  # 99.9% of a candidate's energy below this: muffled (the pilot's Eve, 4.9 kHz)
+DULL_HZ = 7000  # below this: dull (shown in the casting room, not a problem)
+
+
+def bandwidth(wav) -> int:
+    """The frequency below which 99.9% of a clip's energy lies. A voice sounds like
+    its clip: the pilot's Eve, made from a clip that stopped at 4.9 kHz, spoke with
+    almost nothing above 5 kHz, thin and far away (measured 2026-10-09)."""
+    import subprocess
+    x = np.frombuffer(subprocess.run(["ffmpeg", "-v", "error", "-i", str(wav), "-f", "f32le", "-ac", "1", "-ar", "44100", "-"],
+                                     capture_output=True, check=True).stdout, dtype=np.float32)
+    spec = np.abs(np.fft.rfft(x)) ** 2
+    f = np.fft.rfftfreq(len(x), 1 / 44100)
+    c = np.cumsum(spec) / max(spec.sum(), 1e-12)
+    return int(f[min(np.searchsorted(c, 0.999), len(f) - 1)])
+
+
 def pitch_problem(entry, hz) -> str | None:
     """Fish's description of a candidate follows the prompt, not the sound
     (a 'male' Jonathan candidate measured 219 Hz): check the pitch itself.
@@ -137,6 +154,8 @@ def recheck() -> dict:
             c = cands.get(r["file"], {})
             r["read"] = round(read_share(c.get("reference_text", ""), r.get("heard", "")), 3)
             r["problems"] = problems(entry, r["read"], c.get("heard_as"), r.get("pitch") or None)
+            if r.get("bandwidth") and r["bandwidth"] < MUFFLED_HZ:
+                r["problems"].append(f"muffled: nothing above {r['bandwidth'] / 1000:.1f} kHz")
             counts["candidates flagged"] += bool(r["problems"])
         f.write_text(json.dumps(rows, indent=1, ensure_ascii=False), encoding="utf-8")
         counts["characters"] += 1
@@ -153,9 +172,12 @@ def screen_key(key: str, entry: dict) -> list:
         heard = " ".join(w["text"] for w in qa.transcribe(wav, "large-v3"))
         read = read_share(c["reference_text"], heard)
         hz = pitch(pcm)
+        bw = bandwidth(wav)
         problems_ = problems(entry, read, c.get("heard_as"), hz)
-        out.append({"file": c["file"], "read": round(read, 3), "heard": heard, "pitch": round(hz or 0), "problems": problems_,
-                    "embedding": spk.embed(pcm).tolist()})
+        if bw < MUFFLED_HZ:
+            problems_.append(f"muffled: nothing above {bw / 1000:.1f} kHz")
+        out.append({"file": c["file"], "read": round(read, 3), "heard": heard, "pitch": round(hz or 0), "bandwidth": bw,
+                    "problems": problems_, "embedding": spk.embed(pcm).tolist()})
     return out
 
 
@@ -197,3 +219,32 @@ def nearest_others(key_file_pairs=None):
         j = int(np.argmax(np.where(mask, sims[i], -9)))
         out[n] = (names[j], float(sims[i, j]))
     return out
+
+
+def screen_all(follow: bool = False, chunk: int = 10) -> int:
+    """Screen every character whose candidates aren't all screened, `chunk` at a time
+    (each chunk's embeddings saved as it goes). With `follow`, keep going while Voice
+    Design is still adding candidates (its log grew in the last five minutes)."""
+    import time
+    done = 0
+    while True:
+        entries = castmod.load()
+        todo = []
+        for key, e in sorted(entries.items(), key=lambda kv: -kv[1]["words"]):
+            cands = voices.candidates(key)
+            if e.get("voice_of") or not cands:
+                continue
+            f = paths.VOICES / voices.slug(key) / "screen.json"
+            seen = {r["file"] for r in json.loads(f.read_text(encoding="utf-8"))} if f.exists() else set()
+            if any(c["file"] not in seen for c in cands):
+                todo.append(key)
+        for i in range(0, len(todo), chunk):
+            screen(todo[i:i + chunk])
+            done += len(todo[i:i + chunk])
+            print(f"{time.strftime('%H:%M:%S')} screened {done} characters", flush=True)
+        log = paths.VOICES / "design.log"
+        designing = log.exists() and time.time() - log.stat().st_mtime < 300
+        if not follow or (not todo and not designing):
+            return done
+        if not todo:
+            time.sleep(60)

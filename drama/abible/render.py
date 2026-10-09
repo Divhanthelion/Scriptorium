@@ -87,7 +87,11 @@ def request_text(lines: list, voices: dict, deliveries=True):
             cue.append(delivery_cue(line["delivery"]))
         if aged in AGE_CUE:
             cue.append(AGE_CUE[aged])
-        text = lexicon.apply(line["text"])
+        text = line["text"]
+        if paths.LANGUAGE == "es":  # the RV1909 in today's spelling, for the voice only
+            from .es import for_voice
+            text = for_voice(text)
+        text = lexicon.apply(text)
         tag = f"<|speaker:{order.index(vid)}|>" if vid != prev or cue else ""
         parts.append(tag + "".join(cue) + (" " if cue else "") + text)
         prev = vid
@@ -100,9 +104,15 @@ def request_text(lines: list, voices: dict, deliveries=True):
 def body_for(text, ids):
     # normalize_loudness (the S2 default, stated so it can't change under us) evens out each
     # request's level; quality-guard is Fish's own check on a synthesis (free, no slower: 2026-10-09).
-    return {"text": text, "reference_id": ids if len(ids) > 1 else ids[0], "format": "mp3", "mp3_bitrate": 128,
+    body = {"text": text, "reference_id": ids if len(ids) > 1 else ids[0], "format": "mp3", "mp3_bitrate": 128,
             "latency": "normal", "normalize": True, "chunk_length": 300, "temperature": 0.7, "top_p": 0.7,
             "prosody": {"speed": SPEED, "normalize_loudness": True}, "features": ["quality-guard"]}
+    if paths.LANGUAGE != "en":
+        # Fish's normalization is for English and Chinese text; a Spanish voice reads
+        # more naturally without it, and a little more expressively at 0.8 (the owner
+        # chose this, "C", from four versions of Genesis 3:1-13 on 2026-10-09)
+        body.update({"normalize": False, "temperature": 0.8})
+    return body
 
 
 def cache_key(body, attempt=0) -> str:

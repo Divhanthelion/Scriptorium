@@ -131,11 +131,16 @@ def tts_with_timestamps(body: dict, model: str = MODEL, timeout: int = 3600):
 # ------------------------------------------------------------------ voices
 
 def design(instruction: str, reference_text: str | None, n: int = 4, seed: int | None = None,
-           guidance_scale: float = 2.0):
+           guidance_scale: float = 2.0, language: str | None = None, num_step: int | None = None):
     """POST /v1/voice-design ($0.01 a request, whatever n). Returns the candidates
     (each with audio_base64 WAV, sample_rate, duration_ms and, when present, a
-    signature for /model)."""
-    body = {"instruction": instruction[:2000], "language": "en", "n": n, "guidance_scale": guidance_scale}
+    signature for /model). `language` is the line's language (the translation's, by
+    default; the KJV's client always sent "en", and the Spanish pilot was designed so);
+    `num_step` the designer's diffusion steps (Fish's default, 32, when not given)."""
+    body = {"instruction": instruction[:2000], "language": language or paths.LANGUAGE, "n": n,
+            "guidance_scale": guidance_scale}
+    if num_step:
+        body["num_step"] = num_step
     if reference_text:
         body["reference_text"] = reference_text[:150]
     if seed is not None:

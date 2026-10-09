@@ -1,4 +1,6 @@
 {
  "about": "The Reina-Valera 1909's own casting rules, over policy.json (the owner chose neutral Latin American Spanish on 2026-10-09).",
- "accent": "A native speaker of neutral Latin American Spanish, as the Reina-Valera is read aloud in churches across Latin America: clear, unhurried diction, natural Spanish vowels and rhythm, no foreign accent and no regional caricature. Voices differ by age, pitch, texture, pace and temperament."
+ "accent": "A native speaker of neutral Latin American Spanish, as the Reina-Valera is read aloud in churches across Latin America: clear, unhurried diction, natural Spanish vowels and rhythm, no foreign accent and no regional caricature. Voices differ by age, pitch, texture, pace and temperament. Recorded close to a high-quality studio microphone: full, crisp and present, with natural brightness and body; never muffled, thin, tinny, distant or telephone-like, and no room echo.",
+ "accent_note": "The last sentence: the pilot's women sounded tinny and far away. Voice Design often returns muffled candidates (nothing above about 5 kHz), most of all for briefs asking for a soft, quiet or intimate voice, and a voice sounds like its clip. Measured on Eve, Hannah and Ruth (2026-10-09), the sentence and 64 steps gave fewer badly muffled candidates (1 of 12, against 3 of 12) but no more full ones; screening measures every candidate and the casting room shows it.",
+ "design": {"num_step": 64}
 }

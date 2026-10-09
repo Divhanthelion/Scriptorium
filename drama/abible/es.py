@@ -48,3 +48,20 @@ def announcement(code: str, chapter: int, translation: str = "rv1909") -> str:
     if chapter == 1:
         return f"{name}. Capítulo {number_words(chapter)}."
     return f"{name}, capítulo {number_words(chapter)}."
+
+
+def for_voice(text: str) -> str:
+    """The RV1909 as a Spanish voice reads it most naturally: today's spelling of the
+    1909 accents on words of one syllable ("á", "fué", "vió", "dió"), the colon that
+    only joins two clauses as the semicolon modern Reina-Valeras print ("Sea la luz;
+    y fue la luz"), and a chapter's first word in capitals as an ordinary word
+    ("EMPERO" -> "Empero"). Only what is sent to the voice changes; the script and the
+    app keep the RV1909's text. (The owner heard four versions of Genesis 3:1-13 on
+    2026-10-09 and chose this one, with temperature 0.8: render.body_for.)"""
+    text = re.sub(r"(?<!\w)[áéó](?!\w)", lambda m: {"á": "a", "é": "e", "ó": "o"}[m.group()], text)
+    text = re.sub(r"(?<!\w)[ÁÉÓ](?!\w)", lambda m: {"Á": "A", "É": "E", "Ó": "O"}[m.group()], text)
+    for old, new in [("fué", "fue"), ("fuí", "fui"), ("dió", "dio"), ("vió", "vio"), ("ví", "vi"), ("dí", "di")]:
+        text = re.sub(rf"(?<!\w){old}(?!\w)", new, text)
+        text = re.sub(rf"(?<!\w){old.capitalize()}(?!\w)", new.capitalize(), text)
+    text = re.sub(r":(\s+)(?=[a-zñáéíóú])", r";\1", text)
+    return re.sub(r"(?<!\w)([A-ZÁÉÍÓÚÑ]{2,})(?!\w)", lambda m: m.group(1).capitalize(), text, count=1)

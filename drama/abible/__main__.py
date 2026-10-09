@@ -60,6 +60,8 @@ def main(argv):
                     if not e.get("voice_of") and not e.get("voice") and not voices.candidates(k)][:int(args[1])]
             for key in todo:
                 print(key, [c["file"] for c in voices.design(key)])
+        elif sub == "all":
+            print(json.dumps(voices.design_all(), indent=1, ensure_ascii=False))
         elif sub == "audition":
             print(voices.audition_page(args[1:]))
         elif sub == "choose":
