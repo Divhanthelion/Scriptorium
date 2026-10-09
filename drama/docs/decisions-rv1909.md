@@ -34,12 +34,13 @@ transcribed in Spanish (Whisper medium, every difference heard again by large-v3
 - Fish heard all 20 candidates as Spanish with a neutral Latin American accent; each
   sample clip says its line exactly.
 - **Stray words at a change of speaker.** In 4 of 9 renders of the chapter, a voice
-  added a few nonsense words ("Manirana Sediru") just as a new speaker began: never
-  the same place twice. Rendering in halves, a calmer temperature, or a line break
-  before each speaker didn't prevent it (the KJV's checks report it rarely: 22
-  insertions in 429 chapters). Each was caught by the transcription check and gone
-  when that scene was rendered again. So for the RV1909 the check runs on every
-  chapter and a scene with confirmed stray words is rendered again (E12).
+  added a few nonsense words ("Manirana Sediru") just as a new speaker began: twice
+  at the same change (Eve to the narrator after 3:3), otherwise at others. Rendering
+  in halves didn't prevent it, nor did a calmer temperature (1 of 2); a line break
+  before each speaker had none in 2 renders, too few to tell. (The KJV's checks report
+  insertions rarely: 22 in 429 chapters.) Each was caught by the transcription check
+  and gone when that scene was rendered again. So for the RV1909 the check runs on
+  every chapter and a scene with confirmed stray words is rendered again (E12).
 - The final pilot: 601 words, every one heard; nothing added; the remaining
   differences are spelling ("con que" for "conque").
 
