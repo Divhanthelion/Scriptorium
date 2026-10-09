@@ -286,3 +286,34 @@ def design_all(workers: int = 4) -> dict:
                 f.write(f"{time.strftime('%H:%M:%S')} FAILED {key}: {err}\n")
             f.flush()
     return {"designed": done, "of": len(todo), "failed": failed}
+
+
+def redesign_for_clarity(keys: list, need_hz: int = 7000, rounds: int = 3, workers: int = 4) -> dict:
+    """More candidates for characters with none full enough (screen.bandwidth): up to
+    `rounds` more batches each, stopping once a candidate reaches `need_hz`. Voice
+    Design is random: about one woman's candidate in five came out full (2026-10-09),
+    so a few more batches find most of them one. Logged to design.log, so screening
+    (screen.screen_all --follow) picks the new candidates up."""
+    import concurrent.futures as cf
+    import time
+    from . import screen
+
+    log = paths.VOICES / "design.log"
+
+    def best(key):
+        return max([screen.bandwidth(paths.VOICES / slug(key) / c["file"]) for c in candidates(key)] or [0])
+
+    def one(key):
+        tries = 0
+        while tries < rounds and best(key) < need_hz:
+            design(key, new_line=True)
+            tries += 1
+        return key, tries, best(key)
+
+    out = {}
+    with cf.ThreadPoolExecutor(workers) as ex, open(log, "a", encoding="utf-8") as f:
+        for key, tries, bw in ex.map(one, keys):
+            out[key] = {"rounds": tries, "best_hz": bw}
+            f.write(f"{time.strftime('%H:%M:%S')} redesign {key}: {tries} round(s), best {bw} Hz\n")
+            f.flush()
+    return out
