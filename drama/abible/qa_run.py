@@ -42,7 +42,11 @@ def main(follow=False):
         todo = pending()
         for code, ch in todo:
             try:
-                qa.check_chapter(OUT, code, ch)
+                if paths.BIBLE == "kjv":
+                    qa.check_chapter(OUT, code, ch)
+                else:  # the RV1909: a scene with stray words is rendered again (redo.py)
+                    from . import redo
+                    redo.check_and_redo(OUT, code, ch)
             except Exception as e:  # noqa: BLE001 - recorded, the rest go on
                 (OUT / f"{code}.{ch}.qa.json").write_text(json.dumps(
                     {"chapter": f"{code} {ch}", "error": str(e), "words": {}, "voices": {"flagged": []}, "sound": {}}),
