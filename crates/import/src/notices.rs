@@ -2,8 +2,10 @@
 //! the app's dependency graph (for every platform it builds on), with its licence and
 //! the licence texts it ships, so the app can carry them as their licences require.
 //!
-//!     cargo run -p kjv-import -- notices        write NOTICE, ui/software.json, and THIRD-PARTY-SOFTWARE.md
-//!     cargo run -p kjv-import -- notices check  fail if they are out of date
+//! ```text
+//! cargo run -p kjv-import -- notices        write NOTICE, ui/software.json, and THIRD-PARTY-SOFTWARE.md
+//! cargo run -p kjv-import -- notices check  fail if they are out of date
+//! ```
 //!
 //! NOTICE lists every work the app carries (from the catalogues in data/library/, with
 //! each one's licence and credit) after the sections in licenses/NOTICE-fixed.txt.
@@ -255,6 +257,9 @@ struct Crossrefs {
 /// A translation, commentary, or cross-reference collection, as its catalogue lists it.
 #[derive(Deserialize)]
 struct Work {
+    /// A translation's id in the library ("bsb")
+    #[serde(default)]
+    id: Option<String>,
     name: String,
     licence: String,
     credit: String,
@@ -273,6 +278,12 @@ struct Work {
 /// What each licence is called, where it is, and what it asks, in the order NOTICE gives them.
 pub const LICENCES: &[(&str, &str, &str, &str)] = &[
     ("pd", "Public domain", "", "Free of copyright: no conditions."),
+    (
+        "cc0",
+        "Creative Commons Zero 1.0 (CC0 1.0)",
+        "https://creativecommons.org/publicdomain/zero/1.0/",
+        "Dedicated to the public domain: no conditions.",
+    ),
     ("cc-by-4.0", "Creative Commons Attribution 4.0 (CC BY 4.0)", "https://creativecommons.org/licenses/by/4.0/", "Free to share and adapt, with credit and a note of any changes."),
     (
         "cc-by-sa-4.0",
@@ -330,6 +341,47 @@ fn works(out: &mut String, title: &str, list: &[Work]) -> Result<(), String> {
     Ok(())
 }
 
+/// The audio Bibles, from data/audio/<recording>.json: "Berean Standard Bible (audio)
+/// by Bob Souer".
+fn audio_works(root: &Path, bibles: &[Work]) -> Result<Vec<Work>, String> {
+    #[derive(Deserialize)]
+    struct Recording {
+        reader: String,
+        bibles: Vec<String>,
+        licence: String,
+        credit: String,
+        source: String,
+    }
+    let mut files: Vec<_> = match fs::read_dir(root.join("data/audio")) {
+        Ok(dir) => dir.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect(),
+        Err(_) => return Ok(Vec::new()),
+    };
+    files.sort();
+    let mut out = Vec::new();
+    for path in files {
+        let text = fs::read_to_string(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
+        let r: Recording = serde_json::from_str(&text).map_err(|e| format!("{}: {}", path.display(), e))?;
+        let read = r
+            .bibles
+            .iter()
+            .map(|id| bibles.iter().find(|b| b.id.as_deref() == Some(id.as_str())).map_or(id.clone(), |b| b.name.clone()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push(Work {
+            id: None,
+            name: format!("{} (audio)", read),
+            licence: r.licence,
+            credit: r.credit,
+            abbr: None,
+            year: None,
+            author: Some(r.reader),
+            ebible: None,
+            url: Some(r.source),
+        });
+    }
+    Ok(out)
+}
+
 /// NOTICE: the app's own licence, then every work it carries and its terms.
 fn notice(root: &Path) -> Result<String, String> {
     let read = |rel: &str| fs::read_to_string(root.join(rel)).map_err(|e| format!("{}: {}", rel, e)).map(|t| t.replace("\r\n", "\n"));
@@ -352,6 +404,10 @@ fn notice(root: &Path) -> Result<String, String> {
     works(&mut out, "Bible translations", &bibles.bible)?;
     works(&mut out, "Commentaries", &commentaries.commentary)?;
     works(&mut out, "Cross-references", &crossrefs.crossrefs)?;
+    let audio = audio_works(root, &bibles.bible)?;
+    if !audio.is_empty() {
+        works(&mut out, "Audio Bibles", &audio)?;
+    }
     out.push('\n');
     out.push_str(&include_str!("../licenses/NOTICE-fixed.txt").replace("\r\n", "\n"));
     Ok(out)

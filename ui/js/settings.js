@@ -13,6 +13,9 @@ export const VIEWS = [
 export const TEXT_SCALES = [0.85, 0.92, 1, 1.1, 1.2, 1.35, 1.5, 1.7];
 export const ORIG_SCALES = [1, 1.15, 1.3, 1.45, 1.6];
 
+/** Playback speeds the audio Bibles offer. */
+export const AUDIO_SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+
 export const DEFAULTS = {
   theme: "system", // system | light | dark
   textScale: 1,
@@ -28,6 +31,8 @@ export const DEFAULTS = {
   // Where Search looks: the translation being read, the chosen translations and
   // commentaries, or everything
   search: { in: "reading", translations: [], commentaries: [] },
+  // The audio Bibles: how fast they read, and whether the page follows the verse being read
+  audio: { speed: 1, follow: true },
   verseNumbers: true,
   redLetter: true,
   translit: true,
@@ -199,6 +204,10 @@ export function sanitize(raw) {
       translations: idList(s.search?.translations) ?? [],
       commentaries: idList(s.search?.commentaries) ?? [],
     },
+    audio: {
+      speed: oneOf(s.audio?.speed, AUDIO_SPEEDS, DEFAULTS.audio.speed),
+      follow: typeof s.audio?.follow === "boolean" ? s.audio.follow : DEFAULTS.audio.follow,
+    },
     verseNumbers: bool("verseNumbers"),
     redLetter: bool("redLetter"),
     translit: bool("translit"),
@@ -222,25 +231,34 @@ export function sanitize(raw) {
   };
 }
 
-/** Why the settings couldn't be read, if they couldn't: then they aren't written over
- * (with the defaults the app falls back on) until it starts again. */
-export let loadError = null;
+// Nothing is written until the saved settings have been read: saving the defaults
+// before then (the window closing early) or after a failed read would replace the
+// reader's file. "No settings yet" (null) is a successful read; an error is not.
+let loaded = false;
 
+/** The saved settings, or the defaults on first run or when they can't be read. */
 export async function load() {
+  let raw;
   try {
-    return sanitize(await loadSettings());
+    raw = await loadSettings();
   } catch (error) {
-    console.error("Could not load settings", error);
-    loadError = String(error.message ?? error);
+    console.error("Could not load settings; changes won't be saved", error);
     return sanitize(null);
   }
+  loaded = true;
+  return sanitize(raw);
+}
+
+/** False until settings have been read successfully (saving is off until then). */
+export function isLoaded() {
+  return loaded;
 }
 
 let saveTimer = null;
 
 /** Save soon; repeated changes within half a second are written once. */
 export function save(settings) {
-  if (loadError) return;
+  if (!loaded) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveSettings(settings).catch((error) => console.error("Could not save settings", error));
@@ -249,7 +267,7 @@ export function save(settings) {
 
 /** Write immediately (e.g. when the window is closing). */
 export function flush(settings) {
-  if (loadError) return Promise.resolve();
+  if (!loaded) return Promise.resolve();
   clearTimeout(saveTimer);
   return saveSettings(settings);
 }

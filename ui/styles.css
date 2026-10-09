@@ -9,7 +9,7 @@
 @font-face {
   font-family: "Noto Sans Greek";
   src: url("fonts/NotoSans-Regular.ttf") format("truetype");
-  unicode-range: U+0370-03FF, U+1F00-1FFF, U+0300-036F;
+  unicode-range: U+0370-03FF, U+1F00-1FFF, U+0300-036F, U+002C, U+002E; /* commas and periods in the Greek text */
   font-display: swap;
 }
 
@@ -29,6 +29,7 @@
   --red-letter: #b0261d;
   --hit: #ffe486;
   --hit-text: #1e1c19;
+  --hit-red: #b0261d; /* red letter on --hit: 5.3:1 */
   --hebrew: #5d3b91;
   --greek: #22704e;
   --selected: rgb(47 93 168 / 0.08);
@@ -68,6 +69,7 @@
   --red-letter: #ff8f84;
   --hit: #6e5c13;
   --hit-text: #fff6d6;
+  --hit-red: #ffcbc4; /* --red-letter is only 3:1 on --hit; this is 4.6:1 */
   --hebrew: #c9adf2;
   --greek: #8fd6b3;
   --selected: rgb(140 180 255 / 0.10);
@@ -90,6 +92,7 @@
     --red-letter: #ff8f84;
     --hit: #6e5c13;
     --hit-text: #fff6d6;
+    --hit-red: #ffcbc4;
     --hebrew: #c9adf2;
     --greek: #8fd6b3;
     --selected: rgb(140 180 255 / 0.10);
@@ -335,6 +338,9 @@ mark.hit {
   border-radius: 3px;
   padding: 0 1px;
 }
+/* Words of Christ stay red inside a search match (a lighter red on the dark highlight) */
+mark.hit.red { color: var(--hit-red); }
+.app[data-red-letter="false"] mark.hit.red { color: var(--hit-text); }
 
 .verse.is-title .verse-text {
   font-style: italic;
@@ -752,6 +758,7 @@ input[type="number"]:focus, select:focus, .chat-input:focus {
   text-align: start;
 }
 .row-button:hover { background: var(--surface-2); }
+.row-button:disabled { opacity: 0.5; cursor: default; background: none; }
 .row-button .grow { flex: 1; min-width: 0; }
 .row-sub { display: block; font-size: 0.8125rem; color: var(--muted); }
 .row-main { display: block; font-weight: 600; }
@@ -1462,3 +1469,55 @@ details.note > summary { cursor: pointer; min-height: 32px; display: list-item; 
 .nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A single word wider than a small screen at the largest sizes breaks rather than overflowing */
 .verse-text, .orig-text { overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------ audio Bibles */
+
+.listen-button.is-playing { color: var(--accent); background: var(--accent-soft); }
+
+/* The verse being read */
+.verse.is-heard { background: var(--accent-soft); border-radius: 6px; }
+
+.player {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + var(--safe-bottom));
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 24px));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 6px 8px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 4;
+}
+.player[hidden] { display: none; }
+.player-controls { display: flex; align-items: center; }
+.player-play { color: var(--accent); }
+.player-what { display: flex; flex-direction: column; min-width: 0; padding-inline: 4px; }
+.player-title { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-sub { font-size: 0.8125rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.player-speed {
+  min-width: 52px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.player-speed:hover { background: var(--surface-2); color: var(--text); }
+.player-seek { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--accent); }
+
+/* Room for the player: the verse bar sits above it, and the last verse can scroll clear */
+.app[data-player="open"] .verse-actions { bottom: calc(16px + 96px + var(--safe-bottom)); }
+.app[data-player="open"] .reader { padding-bottom: calc(230px + var(--safe-bottom)); }
+@media (max-width: 899px) {
+  .player { bottom: calc(76px + var(--safe-bottom)); }
+  .app[data-player="open"] .verse-actions { bottom: calc(76px + 96px + var(--safe-bottom)); }
+}
+.translation-audio { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 0.8125rem; color: var(--accent); }
+.translation-audio .icon { width: 16px; height: 16px; }

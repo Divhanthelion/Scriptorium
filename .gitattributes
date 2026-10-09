@@ -6,3 +6,9 @@ data/library/** text eol=lf
 
 # Licence texts the notices are generated from, the same on every platform
 crates/import/licenses/** text eol=lf
+
+# Shell scripts must stay LF even on Windows checkouts; batch files need CRLF
+*.sh text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf

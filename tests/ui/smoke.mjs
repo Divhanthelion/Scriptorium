@@ -18,6 +18,8 @@ const chromePath = process.argv[2] || process.env.CHROME || "google-chrome";
 const profile = mkdtempSync(join(tmpdir(), "kjv-ui-"));
 const chrome = spawn(chromePath, [
   "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+  // The audio Bibles' player is started by the tests, not a person's tap
+  "--autoplay-policy=no-user-gesture-required",
   `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, "about:blank",
 ], { stdio: "ignore" });
 
@@ -366,7 +368,7 @@ await test("Search: nothing chosen, Greek accents, and keys inside a dialog", "b
   $$('[aria-label="Search in"] button')[0].click();
   await until(() => $("#panel-body .result-summary"), "the KJV again");
   // Greek as a keyboard types it (tonos) finds Chrysostom's (oxia)
-  const r = await (await fetch("/api/search_source", { method: "POST", body: JSON.stringify({ query: "\u03bb\u03cc\u03b3\u03bf\u03c2", kind: "commentary", source: "chrysostom", scope: "all", book: null, limit: 5 }) })).json();
+  const r = await (await fetch("/api/search_source", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: "\u03bb\u03cc\u03b3\u03bf\u03c2", kind: "commentary", source: "chrysostom", scope: "all", book: null, limit: 5 }) })).json();
   assert(r.total > 0 && r.hits[0].segments.some((x) => x.hit), "found and marked: " + JSON.stringify(r).slice(0, 200));
   // Keys pressed in a dialog stay in it: no turning the page, no closing the panel behind
   $("#translation-button").click();
@@ -388,12 +390,15 @@ await test("About and Licences: every work's licence and credit, and every packa
   $$(".about-actions .button").find((b) => b.textContent === "Licences").click();
   await until(() => $("#licences")?.open && $$(".licence-group").length, "licences");
   const sections = $$(".licence-section .section-title").map((t) => t.textContent);
-  assert(sections.join() === "Scriptorium,Bible translations,Commentaries,Cross-references,Hebrew, Aramaic, Greek, and the KJV,Fonts,Open-source software", "sections: " + sections);
+  assert(sections.join() === "Scriptorium,Bible translations,Audio Bibles,Commentaries,Cross-references,Hebrew, Aramaic, Greek, and the KJV,Fonts,Open-source software", "sections: " + sections);
   // Every translation, commentary, and collection appears once, under its licence
   const works = (title) => [...$$(".licence-section").find((s) => s.querySelector(".section-title").textContent === title).querySelectorAll(".licence-works li")];
   assert(works("Bible translations").length === 44, "44 translations: " + works("Bible translations").length);
   assert(works("Commentaries").length === 11, "11 commentaries: " + works("Commentaries").length);
   assert(works("Cross-references").length === 2, "2 collections");
+  // The audio Bibles: who reads which translation, each under its licence
+  const audio = works("Audio Bibles").map((li) => li.textContent);
+  assert(audio.length === 2 && audio.some((t) => t.startsWith("BSB · read by Bob Souer") && t.includes("CC0")) && audio.some((t) => t.startsWith("WEB-Y · read by Winfred W. Henson")), "the readers: " + audio);
   const nc = $$(".licence-group").find((g) => g.querySelector(".licence-name").textContent.startsWith("CC BY-NC-ND 4.0"));
   assert(nc.querySelector(".licence-asks").textContent.includes("not for commercial use"), "what NC-ND asks");
   assert([...nc.querySelectorAll(".licence-work")].some((w) => w.textContent.startsWith("WYC ")), "Wycliffe under NC-ND");
@@ -451,6 +456,7 @@ async function aiSettings(ai) {
   await sleep(300);
   await fetch(`${BASE}/api/settings_save`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ai: { providers: [MOCK], providerId: "mock", model: null, scope: "chapter", books: [], consent: {}, calibration: {}, ...ai } }),
   });
 }
@@ -552,9 +558,9 @@ await test("Chat: the assistant looks up what isn't attached, and shows what it 
   assert(lastAnswer().querySelector(".msg-usage").textContent.startsWith("6k in · 70 out"), "usage: " + lastAnswer().querySelector(".msg-usage").textContent);
   // Saved with what was looked up (not its text)
   await wait(300);
-  const list = await (await fetch("/api/conversations_list", { method: "POST", body: "{}" })).json();
+  const list = await (await fetch("/api/conversations_list", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
   const saved = list.find((x) => x.title.startsWith("Please look up how the WEB"));
-  const c = await (await fetch("/api/conversation_load", { method: "POST", body: JSON.stringify({ id: saved.id }) })).json();
+  const c = await (await fetch("/api/conversation_load", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: saved.id }) })).json();
   const l = c.messages.at(-1).lookups[0];
   assert(l.label === "John 3:16 · WEB" && l.tool === "read" && !("text" in l), "saved: " + JSON.stringify(l));
   // Turned off, nothing is looked up
@@ -703,7 +709,7 @@ await test("Chat: conversations are saved, starred, renamed, reopened, and clear
   const rows = () => $$(".conversation-row .row-main").map((e) => e.textContent);
   const historyView = () => $('[aria-label="Conversations"]');
   // Start from an empty list (the earlier chat tests saved theirs)
-  const api = (name, body) => fetch("/api/" + name, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
+  const api = (name, body) => fetch("/api/" + name, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
   for (const c of await api("conversations_list", {})) await api("conversation_delete", { id: c.id });
   $('[data-open-panel="chat"]').click();
   await until(() => $(".chat-model")?.value.endsWith("mock-model"), "model list");
@@ -831,6 +837,55 @@ await test("Translations: the KJV keeps its interlinear and gains the Apocrypha"
   $$(".chapter-grid button").find((b) => b.textContent === "1").click();
   await until(() => $("#ref-label").textContent === "John 1" && $("#reader").getAttribute("aria-busy") === "false", "John 1");
   assert($(".word") || visible($("[data-view-switch]")), "back in the KJV's own reader");
+`);
+
+// ------------------------------------------------------------------ audio Bibles
+
+// (CI has only 3 John's recording: tests/ui/fixtures/audio, copied into app/audio)
+await test("Listen: the BSB read aloud, verse by verse, from any verse", "book=Third%20John&chapter=1&tr=bsb", {}, `
+  await until(() => !$("#listen-button").hidden, "Listen is offered for the BSB");
+  assert($("#listen-button").getAttribute("aria-label") === "Listen to 3 John 1, read by Bob Souer", "named: " + $("#listen-button").getAttribute("aria-label"));
+  const audio = $("audio");
+  // From verse 5, through the verse bar
+  $("#v5").click();
+  await until(() => !$('#verse-actions [data-action="listen"]').hidden, "Listen in the verse bar");
+  $('#verse-actions [data-action="listen"]').click();
+  await until(() => !$("#player").hidden && !audio.paused && audio.currentTime > 0, "playing", 15000);
+  await until(() => $(".verse.is-heard")?.id === "v5", "verse 5 is the one being read: " + $(".verse.is-heard")?.id);
+  assert($(".player-title").textContent === "3 John 1", "the player names the chapter: " + $(".player-title").textContent);
+  assert($(".player-sub").textContent.startsWith("Bob Souer · "), "and the reader: " + $(".player-sub").textContent);
+  assert($("#app").dataset.player === "open" && $("#listen-button").classList.contains("is-playing"), "the Listen button shows it's playing");
+  // The next verse, from the player
+  $('#player [aria-label="Next verse"]').click();
+  await until(() => $(".verse.is-heard")?.id === "v6", "on to verse 6: " + $(".verse.is-heard")?.id);
+  // Faster, and round to normal again (remembered between tests)
+  $(".player-speed").click();
+  assert(audio.playbackRate === 1.25 && $(".player-speed").textContent === "1.25×", "faster: " + audio.playbackRate);
+  for (let i = 0; i < 5; i++) $(".player-speed").click();
+  assert(audio.playbackRate === 1 && $(".player-speed").textContent === "1×", "back to normal: " + audio.playbackRate);
+  // Pause with the Listen button; then stop
+  $("#listen-button").click();
+  await until(() => audio.paused, "paused");
+  $('#player [aria-label="Stop and close the player"]').click();
+  assert($("#player").hidden && !$(".verse.is-heard") && $("#app").dataset.player === "closed", "closed, nothing marked");
+  // A chapter that won't load, of a recording that has played: said so, and the
+  // recording is still offered (only one that never loads is taken for missing)
+  $("#listen-button").click();
+  await until(() => !audio.paused && audio.currentTime > 0, "playing again", 15000);
+  audio.src = "/audio/bsb-souer/3JN.99.ogg";
+  await until(() => $("#player").hidden, "the player closes");
+  assert($("#toast").textContent === "Couldn’t play 3 John 1", "said so: " + $("#toast").textContent);
+  await wait(300);
+  assert(!$("#listen-button").hidden, "Listen is still offered");
+`);
+
+await test("Listen: no Listen for a translation without a recording", "book=John&chapter=3&tr=kjv", {}, `
+  await until(() => $("#ref-label").textContent === "John 3" && $("#reader").getAttribute("aria-busy") === "false", "John 3");
+  await wait(500);
+  assert($("#listen-button").hidden, "the KJV has no recording yet");
+  $("#v16").click();
+  await until(() => !$("#verse-actions").hidden, "verse bar");
+  assert($('#verse-actions [data-action="listen"]').hidden, "nor in the verse bar");
 `);
 
 const NOTES_HELPERS = `
@@ -1046,7 +1101,7 @@ await test("Cross-references: in the translation being read, with the KJV's word
 // full and the opening of every other translation.
 {
   const sweep = readFileSync(new URL("./every_library_verse.js", import.meta.url), "utf8");
-  const bibles = await (await fetch(`${BASE}/api/bibles`, { method: "POST", body: "{}" })).json();
+  const bibles = await (await fetch(`${BASE}/api/bibles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
   const full = new Set(process.env.FULL_SWEEP ? bibles.map((b) => b.id) : ["web", "dra", "brenton", "kjvcpb", "jps", "ojb"]);
   let chapters = 0;
   let verses = 0;
@@ -1073,6 +1128,44 @@ await test("Cross-references: in the translation being read, with the KJV's word
     `Every library verse on screen matches its text (${verses} verses, ${chapters} chapters; full: ${[...full].join(", ")})`,
     problems.length ? `FAIL: ${problems.length} problems\n      ${problems.slice(0, 40).join("\n      ")}` : "ok",
   ]);
+}
+
+// ------------------------------------------------------------------ every KJV verse on screen
+
+// Every chapter of the KJV's own 66 books as drawn, compared with old_testament/ and
+// new_testament/ character by character (crates/core/tests/text_fidelity.rs checks those
+// files against the source)
+{
+  const books = await (await fetch(`${BASE}/api/books`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
+  const chapters = [];
+  for (const b of books) {
+    const dir = b.testament === "old" ? "old_testament" : "new_testament";
+    const raw = readFileSync(new URL(`../../${dir}/${b.name}.txt`, import.meta.url), "utf8");
+    for (const line of raw.split(/\r?\n/).filter(Boolean)) {
+      const [, c, v, text] = /^(\d+):(\d+) (.*)$/.exec(line);
+      if (chapters.at(-1)?.book !== b.name || chapters.at(-1).chapter !== Number(c)) {
+        chapters.push({ book: b.name, testament: b.testament, chapter: Number(c), label: `${b.name} ${c}`, lines: [] });
+      }
+      chapters.at(-1).lines.push([Number(v), text]);
+    }
+  }
+  const sweep = readFileSync(new URL("./every_verse.js", import.meta.url), "utf8");
+  for (const view of ["kjv", "interlinear"]) {
+    const name = `Every verse on screen matches the text, character for character (${chapters.length} chapters, ${view} view)`;
+    try {
+      // Each Testament from its first chapter: in Scriptorium the KJV's Apocrypha comes
+      // between them (the library sweep reads it)
+      const problems = [];
+      for (const [testament, first] of [["old", "Genesis"], ["new", "Matthew"]]) {
+        await open(`tr=kjv&book=${first}&chapter=1&view=${view}`);
+        const part = chapters.filter((c) => c.testament === testament);
+        problems.push(...(await run(`async () => (${sweep})(${JSON.stringify(part)}, ${JSON.stringify(view)})`)));
+      }
+      results.push([name, problems.length ? `FAIL: ${problems.length} problems\n      ${problems.join("\n      ")}` : "ok"]);
+    } catch (error) {
+      results.push([name, `FAIL: ${error.message}`]);
+    }
+  }
 }
 
 results.push(["No console errors", consoleErrors.length ? `FAIL: ${consoleErrors.join(" | ")}` : "ok"]);

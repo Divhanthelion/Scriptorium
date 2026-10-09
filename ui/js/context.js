@@ -30,9 +30,11 @@ const LIMITS = [
 /** Characters of the preview drawn at once; Copy always takes everything. */
 const PREVIEW_CHARS = 200_000;
 
-/** 1,085,845 -> "1.09M", 13,939 -> "14k". Limits round down (never overstate the room). */
+/** 1,085,845 -> "1.09M", 13,939 -> "14k", 999,600 -> "1M". Limits round down (never overstate the room). */
 export const compact = (n, round = Math.round) =>
-  n >= 1e6 ? `${(round(n / 1e4) / 100).toFixed(2).replace(/\.?0+$/, "")}M` : n >= 1e3 ? `${round(n / 1e3)}k` : String(n);
+  n >= 1e6 || round(n / 1e3) >= 1000
+    ? `${(round(n / 1e4) / 100).toFixed(2).replace(/\.?0+$/, "")}M`
+    : n >= 1e3 ? `${round(n / 1e3)}k` : String(n);
 export const compactLimit = (n) => compact(n, Math.floor);
 
 let catalogues = null; // Promise of { commentaries, crossrefs }

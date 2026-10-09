@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; media-src 'self' audio: http://audio.localhost",
       "freezePrototype": true
     }
   },
@@ -39,6 +39,9 @@
     "category": "Reference",
     "shortDescription": "A Bible study library: translations, commentaries, and the Hebrew and Greek",
     "longDescription": "A Bible study library on your device: 44 English translations, commentaries from the Church Fathers to the Reformation and after, cross-references, and the Hebrew and Greek behind the King James Version, all offline and searchable, with an optional study assistant that uses the AI service you choose.",
-    "licenseFile": "../LICENSE"
+    "licenseFile": "../LICENSE",
+    "resources": {
+      "audio/": "audio/"
+    }
   }
 }

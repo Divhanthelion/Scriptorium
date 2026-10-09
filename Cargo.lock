@@ -2361,6 +2361,7 @@ dependencies = [
  "kjv-library",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "zstd",
 ]
 
@@ -3745,13 +3746,18 @@ version = "0.1.0"
 dependencies = [
  "android-native-keyring-store",
  "apple-native-keyring-store",
+ "jni",
  "keyring-core",
  "kjv-ai",
  "kjv-core",
  "kjv-library",
+ "ndk",
+ "ndk-context",
+ "ndk-sys",
  "ruzstd",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
