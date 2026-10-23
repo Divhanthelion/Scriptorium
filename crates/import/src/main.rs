@@ -57,6 +57,7 @@ fn main() -> ExitCode {
         Some("build") => sources::verify().and_then(|_| build(&args[1..], bibles::Mode::Write)),
         Some("check") => sources::verify().and_then(|_| build(&[], bibles::Mode::Check)),
         Some("align") => align::build(&args[1..], bibles::Mode::Write),
+        Some("compare") => align::compare(&args[1..]),
         Some("inventory") => commentaries::inventory(&args[1..]),
         Some("notices") => notices::run(&args[1..]),
         _ => Err("usage: kjv-import pin | fetch | build [ids…] | check | inventory [commentary ids…] | notices [check]".to_string()),

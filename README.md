@@ -1,6 +1,6 @@
 # Scriptorium
 
-A library for reading and studying the Bible: 44 English translations, commentaries from the Church Fathers to the Reformation and after, two collections of cross-references, and the Hebrew and Greek behind the King James Version, all on your device and all free. For Windows, macOS, Linux, iPhone and iPad, and Android. Built with Rust and [Tauri](https://tauri.app/).
+A library for reading and studying the Bible: 44 English translations and 11 in Spanish and Portuguese, commentaries from the Church Fathers to the Reformation and after, two collections of cross-references, and the Hebrew and Greek behind the King James Version, all on your device and all free. For Windows, macOS, Linux, iPhone and iPad, and Android. Built with Rust and [Tauri](https://tauri.app/).
 
 ![Psalm 23 in four columns: the KJV, its Hebrew, the World English Bible, and the Douay-Rheims, whose Psalm 22:1 sits beside the KJV's title and first verse](assets/screenshots/parallel-psalm-23.jpg)
 
@@ -9,6 +9,7 @@ A library for reading and studying the Bible: 44 English translations, commentar
 ## What's in it
 
 - **44 English translations**, from Wycliffe's and Tyndale's through the Geneva, the KJV, the Douay-Rheims, and Brenton's Septuagint to the World English Bible and the Berean Standard Bible, each checked character for character against its source
+- **Spanish and Portuguese**: the Reina-Valera 1909 and six more in Spanish, the Bíblia Livre (Almeida's translation, updated) and three more in Portuguese, read alone or beside any other, verse by verse
 - **Commentaries**: Matthew Henry, John Gill, Jamieson-Fausset-Brown, Keil & Delitzsch, Wesley's Notes, Aquinas's Catena Aurea, the Tyndale Open Study Notes with their profiles and articles, and the Fathers: Chrysostom's homilies and Augustine's expositions and tractates, each placed on the passage it expounds
 - **Audio Bibles**: the Berean Standard Bible read by Bob Souer and the World English Bible read by Winfred W. Henson, built into the app (nothing is downloaded): play any chapter, start at any verse, and follow along as each verse is marked
 - **Cross-references**: the Treasury of Scripture Knowledge and OpenBible.info's, with each place's words in the translation you're reading

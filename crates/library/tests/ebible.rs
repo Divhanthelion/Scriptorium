@@ -59,6 +59,9 @@ type Key = (String, u32, String);
 fn check(id: &str) -> Result<usize, String> {
     let mut usfm_zip = read_zip(&cache().join(format!("{}_usfm.zip", id)));
     let mut ours: BTreeMap<Key, (String, Vec<String>)> = BTreeMap::new();
+    // List headers and footers (\lh, \lf) by book and chapter, and the text set with \qs
+    let mut remarks: BTreeMap<(String, u32), Vec<String>> = BTreeMap::new();
+    let mut selahs: std::collections::BTreeSet<String> = ["Selah".to_string()].into();
     for i in 0..usfm_zip.len() {
         let mut f = usfm_zip.by_index(i).unwrap();
         if !f.name().ends_with(".usfm") {
@@ -69,6 +72,27 @@ fn check(id: &str) -> Result<usize, String> {
         let book = usfm::parse(&src, &options(id)).map_err(|e| format!("{} {}: {}", id, f.name(), e))?;
         if usfm::is_peripheral(&book.code) {
             continue;
+        }
+        for chapter in &book.chapters {
+            for block in &chapter.blocks {
+                let texts = block.content.iter().filter_map(|i| match i {
+                    usfm::Inline::Text { text, styles } => Some((text, styles)),
+                    _ => None,
+                });
+                if block.marker == "lh" || block.marker == "lf" {
+                    // Each run between verse numbers (a header may run into the next verse)
+                    let mut run = String::new();
+                    for i in block.content.iter().chain([&usfm::Inline::Verse { number: String::new(), published: None, alternate: None }]) {
+                        match i {
+                            usfm::Inline::Text { text, .. } => run.push_str(text),
+                            usfm::Inline::Verse { .. } => remarks.entry((book.code.clone(), chapter.number)).or_default().push(words(&std::mem::take(&mut run))),
+                            usfm::Inline::Note { .. } => {}
+                        }
+                    }
+                } else {
+                    selahs.extend(texts.filter(|(t, s)| s.iter().any(|s| s == "qs") && !t.trim().is_empty()).map(|(t, _)| t.trim().to_string()));
+                }
+            }
         }
         let mut titles: BTreeMap<u32, (String, Vec<String>)> = BTreeMap::new();
         for v in usfm::verses(&book) {
@@ -164,8 +188,17 @@ fn check(id: &str) -> Result<usize, String> {
             want = want.replacen(a.as_str(), " ", 1);
         }
         let want = words(&want);
-        // And it puts a space before "Selah" set with \qs, where USFM has none
-        let same = want == have || want.replace(" Selah", "Selah") == have.replace(" Selah", "Selah");
+        // It leaves out list headers and footers ("Jacó teve doze filhos."): they're the
+        // translation's text, kept in the verse they're printed in
+        let mut have = have;
+        for r in remarks.get(&(k.0.clone(), k.1)).into_iter().flatten() {
+            if !r.is_empty() && have.contains(r.as_str()) && !want.contains(r.as_str()) {
+                have = words(&have.replacen(r.as_str(), " ", 1));
+            }
+        }
+        // And it puts a space before what's set with \qs ("Selah", "Selá"), where USFM has none
+        let unspaced = |s: &str| selahs.iter().fold(s.to_string(), |s, q| s.replace(&format!(" {}", q), q));
+        let same = want == have || unspaced(&want) == unspaced(&have);
         if !same {
             let i = want.chars().zip(have.chars()).take_while(|(a, b)| a == b).count();
             let around = |s: &str| s.chars().skip(i.saturating_sub(30)).take(70).collect::<String>();

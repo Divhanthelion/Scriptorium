@@ -685,11 +685,12 @@ impl<'a> Builder<'a> {
     fn bible(&mut self, t: &str, from: &str, verses: &[Ref], original: bool) -> Result<bool, String> {
         let info = self.lib.bible(t).ok_or_else(|| format!("no translation {:?}", t))?;
         let (name, abbr, year) = (info.name.clone(), info.abbr.clone(), info.year.clone());
+        let language = info.other_language().map(|l| format!(" language=\"{}\"", attr(l))).unwrap_or_default();
         if !self.attached.translations.iter().any(|x| x == t) {
             self.attached.translations.push(t.to_string());
         }
         let (refs, missing) = self.in_translation(from, verses, t)?;
-        let head = format!("<bible translation=\"{}\" abbr=\"{}\" year=\"{}\"", attr(&name), attr(&abbr), attr(&year));
+        let head = format!("<bible translation=\"{}\" abbr=\"{}\" year=\"{}\"{}", attr(&name), attr(&abbr), attr(&year), language);
         if refs.is_empty() {
             self.text.push_str(&format!("{}>\n(Not in this translation.)\n</bible>\n", head));
             return Ok(true);
@@ -1045,10 +1046,20 @@ pub fn instructions(lib: &Library, built: &Built) -> String {
 /// tools in [`crate::lookups`]): what isn't attached is looked up, not recalled.
 pub fn instructions_with(lib: &Library, built: &Built, lookups: bool) -> String {
     let a = &built.attached;
-    let mut s = String::from(
-        "You are the study assistant in Scriptorium, a Bible study library: many English translations \
-         (among them the King James Version, 1769 Oxford text, with its Hebrew, Aramaic, and Greek), \
-         commentaries, and cross-references.\n\n",
+    let mut others: Vec<String> = Vec::new();
+    for b in lib.bibles() {
+        if let Some(l) = b.other_language()
+            && !others.iter().any(|o| o == l)
+        {
+            others.push(l.to_string());
+        }
+    }
+    let translations =
+        if others.is_empty() { "many English translations".to_string() } else { format!("many translations, most in English and others in {}", list(&others)) };
+    let mut s = format!(
+        "You are the study assistant in Scriptorium, a Bible study library: {} (among them the King James \
+         Version, 1769 Oxford text, with its Hebrew, Aramaic, and Greek), commentaries, and cross-references.\n\n",
+        translations
     );
     if built.text.is_empty() && lookups {
         s.push_str(
@@ -1076,7 +1087,14 @@ pub fn instructions_with(lib: &Library, built: &Built, lookups: bool) -> String 
     } else {
         s.push_str(&format!("The reader has attached {} below, inside <context>. Each <passage> holds:\n", built.label));
         let names: Vec<String> =
-            a.translations.iter().filter_map(|id| lib.bible(id)).map(|b| format!("{} [{}], {}", b.name, b.abbr, b.year)).collect();
+            a.translations
+                .iter()
+                .filter_map(|id| lib.bible(id))
+                .map(|b| match b.other_language() {
+                    Some(l) => format!("{} [{}], {}, in {}", b.name, b.abbr, b.year, l),
+                    None => format!("{} [{}], {}", b.name, b.abbr, b.year),
+                })
+                .collect();
         s.push_str(&format!(
             "- Its text in {}, inside <bible>. Headings (##) mark chapters, each line starts with its verse \
              number, and \"(title)\" marks a psalm's title. Translations number some verses differently, \

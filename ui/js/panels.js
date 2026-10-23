@@ -67,6 +67,17 @@ function segmented(label, options, value, onChange) {
 
 let strongsSeq = 0;
 
+/** "56 translations in English, Spanish, and Portuguese" (or "many English translations"
+ * before the catalogue has loaded). */
+function translationsLine(bibles) {
+  if (!bibles.length) return "many English translations";
+  const names = { en: "English", es: "Spanish", pt: "Portuguese", ka: "Georgian" };
+  const languages = [...new Set(bibles.map((b) => names[b.language] ?? b.language))];
+  if (languages.length === 1) return `${bibles.length} ${languages[0]} translations`;
+  const last = languages.pop();
+  return `${bibles.length} translations in ${languages.join(", ")}${languages.length > 1 ? "," : ""} and ${last}`;
+}
+
 export function renderStrongs(body, ctx) {
   const st = ctx.state.strongs;
   const input = h("input", {
@@ -327,7 +338,7 @@ export function renderSettings(body, ctx) {
       h(
         "p",
         {},
-        `A library for reading and studying the Bible: ${ctx.state.bibles.length || "many"} English translations, commentaries from the Church Fathers to the Reformation and after, cross-references, and the Hebrew and Greek, all on this device.`,
+        `A library for reading and studying the Bible: ${translationsLine(ctx.state.bibles)}, commentaries from the Church Fathers to the Reformation and after, cross-references, and the Hebrew and Greek, all on this device.`,
       ),
       h("p", {}, "Free, and always will be: no ads, no account, nothing to buy. Nothing is collected; your settings, bookmarks, and conversations stay on this device. If you set up an AI provider, your questions and what you attach go only to that provider."),
       h(

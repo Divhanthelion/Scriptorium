@@ -17,6 +17,8 @@ pub struct BibleSummary {
     pub name: String,
     pub year: String,
     pub group: String,
+    /// The text's language (BCP 47: "en", "es")
+    pub language: String,
     pub licence: String,
     pub credit: String,
     pub about: String,
@@ -58,6 +60,7 @@ pub fn bibles(lib: &Library) -> Vec<BibleSummary> {
             name: b.name.clone(),
             year: b.year.clone(),
             group: b.group.clone(),
+            language: b.language.clone(),
             licence: b.licence.clone(),
             credit: b.credit.clone(),
             about: b.about.clone(),
@@ -86,6 +89,8 @@ pub fn bibles(lib: &Library) -> Vec<BibleSummary> {
 pub struct BibleChapter {
     pub bible: String,
     pub abbr: String,
+    /// The text's language (BCP 47: "en", "es")
+    pub language: String,
     /// The app's book key ("Psalms")
     pub book: String,
     pub chapter: u32,
@@ -137,6 +142,7 @@ pub fn chapter(lib: &Library, bible: &str, book: &str, chapter: u32) -> Result<B
     Ok(BibleChapter {
         bible: info.id.clone(),
         abbr: info.abbr.clone(),
+        language: info.language.clone(),
         book: k.name.to_string(),
         chapter,
         heading: heading(k.display, k.code, chapter),

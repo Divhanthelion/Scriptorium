@@ -34,6 +34,9 @@ pub struct Column {
     /// "KJV", "DRA", "Hebrew", "Greek", "Hebrew & Aramaic"
     pub abbr: String,
     pub name: String,
+    /// The text's language (BCP 47: "en", "es"); empty for the Hebrew and Greek, whose
+    /// words carry their own
+    pub language: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -228,10 +231,10 @@ pub fn chapter(data: &DataBundle, lib: &Library, args: &ParallelArgs) -> Result<
     let mut columns = Vec::new();
     for id in &args.columns {
         if id == ORIGINAL {
-            columns.push(Column { id: id.clone(), abbr: String::new(), name: String::new() });
+            columns.push(Column { id: id.clone(), abbr: String::new(), name: String::new(), language: String::new() });
         } else {
             let info = lib.bible(id).ok_or_else(|| format!("no translation {:?}", id))?;
-            columns.push(Column { id: id.clone(), abbr: info.abbr.clone(), name: info.name.clone() });
+            columns.push(Column { id: id.clone(), abbr: info.abbr.clone(), name: info.name.clone(), language: info.language.clone() });
         }
     }
 
