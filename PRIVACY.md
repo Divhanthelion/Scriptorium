@@ -1,11 +1,20 @@
 # Privacy Policy
 
-**Scriptorium** sends nothing to its developers: it has no servers, accounts, analytics, or tracking. The only data that ever leaves your device is what you choose to send to an AI service you set up yourself (see the study assistant, below).
+**Scriptorium** sends nothing to its developers: it has no servers, accounts, analytics, or tracking. It goes online only when you ask it to: to download an audio Bible, and to reach an AI service you set up yourself (both below). The only data of yours that ever leaves your device is what you choose to send to that AI service.
 
 - The app works entirely offline. The translations, commentaries, cross-references, Hebrew and Greek texts, and lexicons are built into the app.
-- It has no accounts, analytics, advertising, or tracking, and it makes no network requests of its own: only to the AI services you set up, as described below.
+- It has no accounts, analytics, advertising, or tracking, and it makes no network requests of its own except the audio downloads you start and the requests to the AI services you set up, as described below.
 - Your settings (including saved study contexts), bookmarks, and reading history are stored only on your device, in the app's own storage. The app never sends them anywhere. If your device backs up app data (Google or iCloud backup), they are included in that backup under your platform account's own terms; API keys are excluded from backups.
 - Links in the app (on the Licences page, for example) open in your web browser only when you tap them. Those sites have their own privacy policies.
+
+## Audio Bibles
+
+The audio Bibles aren't built into the app; each is downloaded when you ask for it.
+
+- When you tap Download (in Settings, Audio Bibles, or when you choose Listen on a book that isn't on your device yet), the app fetches that recording's files from Scriptorium's own releases on GitHub (github.com, which hands the files over from GitHub's file servers, such as release-assets.githubusercontent.com), and from nowhere else.
+- Like any website, GitHub sees your device's IP address and which files it asks for; [GitHub's privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement) applies. The app sends no account, identifier, or cookie with these requests, only its name and version. Scriptorium's developers can see how many times each file has been downloaded, never by whom.
+- The app checks every file against a checksum built into it before playing it, and never downloads anything you didn't ask for, not even to resume or update a download.
+- Recordings stay on your device until you delete them (Settings, Audio Bibles). They are left out of your device's app-data backups; on iPhone and iPad, iOS may remove them when your device runs short of space, and you can download them again.
 
 ## The optional study assistant
 
@@ -22,4 +31,4 @@ If this policy ever changes, the new version will be published here with a new d
 
 Contact: open an issue at https://github.com/Divhanthelion/Scriptorium/issues
 
-_Last updated: 5 October 2026_
+_Last updated: 23 October 2026_

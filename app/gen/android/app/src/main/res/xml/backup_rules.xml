@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 11 and earlier. AI keys are encrypted with a device-only Keystore key,
-     so a backup of them could never be read on another device: leave them out. -->
+     so a backup of them could never be read on another device: leave them out. The
+     audio Bibles (audio/) are downloaded again when wanted, and would take a backup far
+     past Android's 25 MB, which stops it backing up anything. -->
 <full-backup-content>
     <exclude domain="sharedpref" path="." />
     <exclude domain="root" path="secrets.json" />
+    <exclude domain="root" path="audio/" />
 </full-backup-content>

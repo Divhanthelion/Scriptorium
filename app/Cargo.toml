@@ -24,6 +24,7 @@ sha2 = "0.10"
 kjv-core = { path = "../crates/core" }
 kjv-library = { path = "../crates/library" }
 kjv-ai = { path = "../crates/ai" }
+kjv-audio = { path = "../crates/audio" }
 tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"

@@ -40,11 +40,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/usfm" && unzip -o "$RUNNER_TEMP/eng-kjv_usfm.zip" -d "$RUNNER_TEMP/usfm"
       # Checks every character of the KJV, every original-language word, lexicon link, and
       # red-letter span; the assistant's context, search, and parallel reading against the
-      # library; the assistant's streaming; and the preview server's request checks
-      - run: cargo test --release -p kjv-core -p kjv-ai -p kjv-devserver
+      # library; the assistant's streaming; the audio Bibles' download manifests and the
+      # downloader (every chapter checked, resume, redirects, cancel); and the preview
+      # server's request checks
+      - run: cargo test --release -p kjv-core -p kjv-ai -p kjv-audio -p kjv-devserver
         env:
           KJV_SOURCE: ${{ runner.temp }}/eng-kjv_vpl.txt
           KJV_USFM: ${{ runner.temp }}/usfm
+      # Packing a recording for download
+      - run: cargo test --release -p kjv-import --lib audio::tests
       # The library: catalogue, alignment, cross-references, search index
       - run: cargo test --release -p kjv-library --features build
 
@@ -81,12 +85,12 @@ jobs:
         with:
           node-version: 22
       - run: cargo build --release -p kjv-devserver
-      # One recording of the audio Bibles for the player's tests (the rest aren't in git)
-      - run: mkdir -p app/audio/bsb-souer && cp tests/ui/fixtures/audio/bsb-souer/3JN.1.ogg app/audio/bsb-souer/
+      # The audio Bibles are downloaded from the preview server's own stand-in for GitHub,
+      # which has 3 John's recording (tests/ui/fixtures/audio-releases)
       - name: Start the preview server and a stand-in model
         run: |
           python3 tests/ui/mock_llm.py 8765 &
-          ./target/release/kjv-devserver 1420 > devserver.log 2>&1 &
+          SCRIPTORIUM_AUDIO_HOST=test ./target/release/kjv-devserver 1420 > devserver.log 2>&1 &
           for i in $(seq 180); do curl -sf -X POST -H 'Content-Type: application/json' localhost:1420/api/books -d '{}' > /dev/null && exit 0; sleep 1; done
           cat devserver.log; exit 1
       - run: node tests/ui/smoke.mjs google-chrome

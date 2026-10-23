@@ -7,13 +7,15 @@
 //!     cargo run -p kjv-import -- check          rebuild in memory and compare with data/library/
 //!     cargo run -p kjv-import -- inventory      list every markup element each commentary source uses
 //!     cargo run -p kjv-import -- notices        write the app's third-party software notices
+//!     cargo run -p kjv-import -- audio-pack <recording> <release> [folder]
+//!                                               pack a recording for download (docs/AUDIO.md)
 //!
 //! Sources live in `.cache/sources/` (git-ignored); `data/library/sources.toml` pins
 //! each one by URL, size, and SHA-256 so every build converts exactly the same bytes.
 
 use std::process::ExitCode;
 
-use kjv_import::{align, bibles, commentaries, crossrefs, notices, sources};
+use kjv_import::{align, audio, bibles, commentaries, crossrefs, notices, sources};
 
 /// `build` with no ids converts everything, then aligns every translation with the KJV;
 /// each id names a translation or a commentary ("commentaries" means all of them, and
@@ -60,7 +62,8 @@ fn main() -> ExitCode {
         Some("compare") => align::compare(&args[1..]),
         Some("inventory") => commentaries::inventory(&args[1..]),
         Some("notices") => notices::run(&args[1..]),
-        _ => Err("usage: kjv-import pin | fetch | build [ids…] | check | inventory [commentary ids…] | notices [check]".to_string()),
+        Some("audio-pack") => audio::run(&args[1..]),
+        _ => Err("usage: kjv-import pin | fetch | build [ids…] | check | inventory [commentary ids…] | notices [check] | audio-pack <recording> <release> [folder]".to_string()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

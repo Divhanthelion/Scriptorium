@@ -2354,6 +2354,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kjv-audio"
+version = "0.1.0"
+dependencies = [
+ "kjv-core",
+ "kjv-library",
+ "reqwest 0.12.28",
+ "serde",
+ "sha2 0.10.9",
+ "tiny_http",
+ "tokio",
+]
+
+[[package]]
 name = "kjv-core"
 version = "0.1.0"
 dependencies = [
@@ -2371,6 +2384,7 @@ version = "0.1.0"
 dependencies = [
  "keyring-core",
  "kjv-ai",
+ "kjv-audio",
  "kjv-core",
  "kjv-library",
  "serde",
@@ -3749,6 +3763,7 @@ dependencies = [
  "jni",
  "keyring-core",
  "kjv-ai",
+ "kjv-audio",
  "kjv-core",
  "kjv-library",
  "ndk",

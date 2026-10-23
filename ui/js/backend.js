@@ -39,10 +39,31 @@ export function audioChapter(bible, book, chapter) {
   return call("audio_chapter", { bible, book, chapter });
 }
 
-/** Where the player loads a chapter's file from: the app's own audio protocol (the files
- * ship with it), or the dev server's /audio/ in the browser preview. */
+/** Where the player loads a chapter's file from: the app's own audio protocol (downloaded,
+ * or shipped with the app), or the dev server's /audio/ in the browser preview. */
 export function audioUrl(file) {
   return tauri ? tauri.core.convertFileSrc(file, "audio") : `/audio/${file}`;
+}
+
+/** Every recording: { recording, reader, bibles, included (came with the app), download:
+ * null (not offered) or { size, have (bytes here), books: [{ code, name, size, have,
+ * chapters: "1101…" (a digit a chapter) }], running, book, queued, partial, error } }. */
+export function audioDownloads() {
+  return tauri ? tauri.core.invoke("audio_downloads") : post("audio_downloads", {});
+}
+
+/** Download a recording when the reader asks: want = { recording, books: [codes] or null
+ * (all), from: { book: code, chapter } or null }. Its status says how it's going. */
+export function audioDownload(want) {
+  return tauri ? tauri.core.invoke("audio_download", { want }) : post("audio_download", { want });
+}
+
+export function audioCancel(recording) {
+  return tauri ? tauri.core.invoke("audio_cancel", { recording }) : post("audio_cancel", { recording });
+}
+
+export function audioDelete(recording) {
+  return tauri ? tauri.core.invoke("audio_delete", { recording }) : post("audio_delete", { recording });
 }
 
 /** Open a link in the system browser. */

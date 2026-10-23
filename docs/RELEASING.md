@@ -84,6 +84,7 @@ These need your identity, payment, or tax details, so they can't be automated.
 - **Data shared:** no. Sending it to the service the user chose is a user-initiated transfer, which Google doesn't count as sharing.
 - **Encrypted in transit:** yes for the cloud services, which all use HTTPS. A server on the user's own network may be plain HTTP; if you want to be strict, answer "no" for that reason.
 - **Users can delete their data:** yes. Conversations are kept only on the device, and the reader deletes them in the app (the Conversations list); the developer never receives any. What the AI service keeps is deleted through that service.
+- **Audio Bible downloads** change none of these answers. The app fetches recordings from the app's own GitHub releases only when the reader taps Download, and sends no user data with the request (no identifier, account, or cookie), so nothing is collected or shared. GitHub sees the IP address, as any server does; the developer sees only download counts.
 
 **Generative AI.** Google's AI-Generated Content policy asks apps whose central feature is an AI chatbot for a way to report offensive answers without leaving the app. Here the assistant is optional, and each answer's **Report** button opens a prefilled report on GitHub in the browser. If review asks for reporting inside the app, that needs a server to receive reports, which Scriptorium doesn't have; it would be a new decision.
 
@@ -152,6 +153,7 @@ To build a Store package locally instead: `powershell -File app/windows/msix/pac
 - The tag must match the version in `app/tauri.conf.json` and `app/Cargo.toml`; the workflow refuses to build otherwise.
 - Unsigned macOS downloads show Gatekeeper's “damaged or incomplete” warning on Apple Silicon until notarization is set up; the Mac App Store build (sandboxed, `.pkg`) is a separate effort not in the pipeline yet.
 - Desktop installers from GitHub have no auto-updater; store builds update through their stores.
+- The audio Bibles aren't in any app package: the app downloads them, when asked, from releases of their own (`audio-<recording>-<n>`), made once and never changed (docs/AUDIO.md, "Publishing a recording"). App releases leave them alone. Before the first release of an app that offers a recording, its audio release must be published, or the app can't download it ("isn't on GitHub yet").
 
 ## Store listing checklist
 
@@ -176,6 +178,7 @@ Scriptorium is a Bible study library that lives on your device. The whole librar
 • Cross-references from the Treasury of Scripture Knowledge and OpenBible.info, with their words
 • The Hebrew and Greek behind the King James Version, word by word, with Strong's numbers, grammar, and a lexicon
 • Search across every translation and commentary at once
+• Audio Bibles, downloaded when you want them: the Berean Standard Bible read by Bob Souer and the World English Bible read by Winfred Henson, with each verse marked as it's read
 
 Optional study assistant (generative AI): connect an AI service you choose, or your own server, with your own key, and ask about exactly the passages and sources you pick. Its answers are generated live by that service and can be wrong; each has a Report button. Nothing is sent anywhere unless you set it up and ask.
 ```

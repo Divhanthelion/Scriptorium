@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use kjv_ai::assistant::{AskArgs, ModelsArgs};
 use kjv_ai::conversations::Conversations;
 use kjv_ai::{Event, ModelInfo, ToolCall, ToolOutput};
+use kjv_audio::Downloads;
 use kjv_core::bundle::DataBundle;
 use kjv_core::dispatch::dispatch_all;
 use kjv_library::Library;
@@ -217,6 +218,34 @@ fn ai_key_delete(ai: State<'_, Ai>, provider_id: String) -> Result<(), String> {
     ai.secrets.delete(&provider_id)
 }
 
+// ---------------------------------------------------------------- audio Bibles
+
+/// Every recording, whether it came with the app, and what of it is downloaded.
+#[tauri::command(async)]
+fn audio_downloads(app: AppHandle, downloads: State<'_, Arc<Downloads>>) -> Vec<kjv_audio::Recording> {
+    downloads.recordings(|id| audio::included(&app, id))
+}
+
+/// Download a recording, or some of its books. Only ever when the reader asks: the app
+/// fetches nothing else (see src/audio.rs for where, kjv_audio for how).
+#[tauri::command]
+fn audio_download(downloads: State<'_, Arc<Downloads>>, want: kjv_audio::Want) -> Result<(), String> {
+    if let Some(work) = downloads.start(&want)? {
+        tauri::async_runtime::spawn(work);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn audio_cancel(downloads: State<'_, Arc<Downloads>>, recording: String) {
+    downloads.cancel(&recording);
+}
+
+#[tauri::command(async)]
+fn audio_delete(downloads: State<'_, Arc<Downloads>>, recording: String) -> Result<(), String> {
+    downloads.delete(&recording)
+}
+
 #[tauri::command]
 fn open_url(app: AppHandle, url: String) -> Result<(), String> {
     // Web pages only (the Licences page's sources and licences, a note's link, a
@@ -249,6 +278,7 @@ pub fn run() {
                 secrets: Secrets::new(dir),
                 running: Mutex::default(),
             });
+            app.manage(Arc::new(audio::downloads(app.handle())?));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -266,7 +296,11 @@ pub fn run() {
             conversations_list,
             conversation_load,
             conversation_save,
-            conversation_delete
+            conversation_delete,
+            audio_downloads,
+            audio_download,
+            audio_cancel,
+            audio_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running Scriptorium");
