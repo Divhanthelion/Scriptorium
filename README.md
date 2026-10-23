@@ -68,12 +68,29 @@ To work on the interface in a browser with the real data:
 cargo run --release -p kjv-devserver   # then open http://localhost:1420
 ```
 
-The library (`data/library/`) is converted from pinned sources by `cargo run -p kjv-import -- build`, and `-- check` proves the conversion reproduces it byte for byte; see [docs/LIBRARY.md](docs/LIBRARY.md). Release builds for every platform run in GitHub Actions when a `v*` tag is pushed; see [docs/RELEASING.md](docs/RELEASING.md).
+The library (`data/library/`) is converted from pinned sources by `cargo run -p kjv-import -- build`, and `-- check` proves the conversion reproduces it byte for byte; see [docs/LIBRARY.md](docs/LIBRARY.md). Release builds for Windows, macOS universal, Linux, and Android (plus an iOS compile check; signed iOS builds need an Apple account) run in GitHub Actions when a `v*` tag is pushed; see [docs/RELEASING.md](docs/RELEASING.md).
+
+## Text accuracy
+
+Every translation in the library is checked against eBible.org's own edition of it when the library is built (see [docs/LIBRARY.md](docs/LIBRARY.md)), and the UI test reads every verse of six representative translations on screen, and the first 25 chapters of every other one (every verse of all of them, weekly). The KJV, which the app carries with its Hebrew and Greek, is checked further, on every change and weekly in CI:
+
+- **Against the source.** All 31,102 verses are compared character for character with the eBible.org 1769 text they came from (Psalm titles joined to verse 1, as the source stores them; the title/verse boundary is checked against the source's own \d markers). Any difference is reported by verse and character position.
+- **Against a reviewed fingerprint.** [`kjv-text.lock`](crates/core/tests/kjv-text.lock) records the text's SHA-256, a hash for every chapter, and the count of each of the text's 65 distinct characters. Changing a single comma fails the tests until the change is reviewed and the lock rewritten.
+- **Typography.** Spacing, punctuation, capitals, apostrophes, hyphens, and parentheses are checked in every verse.
+- **Through the app.** Every verse is checked in the embedded data, the reader, search results, and copied text.
+- **On screen.** The UI test turns every page of all 1,189 chapters in a real browser and compares what is drawn, after CSS, with the text files. It also checks every Hebrew and Greek word card.
+- **Hebrew and Greek glyphs.** Every letter, vowel point, accent, and breathing mark in the original-language text has a glyph in the font the app ships for it.
+
+```sh
+# Compare with the source (download https://ebible.org/Scriptures/eng-kjv_vpl.zip and unzip it first)
+KJV_SOURCE=path/to/eng-kjv_vpl.txt cargo test --release -p kjv-core --test text_fidelity
+```
 
 ## Project structure
 
 ```
 crates/core/      The KJV, Hebrew/Greek, search, parallel reading, the assistant's context, and the app's API
+  tests/          Data checks over every character, verse, word, lexicon link, and red-letter span
 crates/library/   The library: translations, commentaries, cross-references, verse alignment, search index
 crates/import/    Converts the pinned sources into data/library/, and writes the notices
 crates/ai/        Study assistant: streaming client for OpenAI-compatible, Anthropic, and Gemini APIs

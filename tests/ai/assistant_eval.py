@@ -43,7 +43,9 @@ PRICES = {
 
 
 def post(name, body, timeout=600):
-    req = urllib.request.Request(f"{SERVER}/api/{name}", data=json.dumps(body).encode(), method="POST")
+    req = urllib.request.Request(
+        f"{SERVER}/api/{name}", data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"}
+    )
     return urllib.request.urlopen(req, timeout=timeout)
 
 

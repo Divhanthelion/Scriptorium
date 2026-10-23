@@ -53,7 +53,16 @@ export const PRESETS = [
 
 const presetOf = (p) => PRESETS.find((x) => x.id === p.preset) ?? PRESETS.at(-1);
 
-/** Longest answer to ask for, and the room kept free for it in the context window. */
+/** "https://api.openai.com" for "https://api.openai.com/v1"; null if it isn't a URL. */
+function originOf(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Longest answer to ask for (see answerTokens for the room kept free for it). */
 const ANSWER_TOKENS = 16000;
 /** The instructions, in tokens, until Rust has counted them (crates/core/src/context.rs). */
 const INSTRUCTION_TOKENS = 600;
@@ -80,6 +89,7 @@ const chat = {
 };
 
 let finder = null;
+let finderBooks = null; // the library list `finder` was built from
 
 // ------------------------------------------------------------------ helpers
 
@@ -146,9 +156,15 @@ function promptTokens(ctx, extraText = "", contextTokens = chat.size?.tokens ?? 
   return Math.ceil((contextTokens + instructions + history + estimateTokens(extraText)) * factor);
 }
 
+/**
+ * Room kept free for the answer, and the limit sent with the question: the model's own
+ * maximum (at most ANSWER_TOKENS), but no more than a quarter of a known context
+ * window, so a small (8k) model still has room for the question.
+ */
 function answerTokens(ctx) {
-  const max = modelInfo(ctx)?.maxOutput;
-  return max ? Math.min(max, ANSWER_TOKENS) : ANSWER_TOKENS;
+  const max = Math.min(modelInfo(ctx)?.maxOutput ?? ANSWER_TOKENS, ANSWER_TOKENS);
+  const limit = contextWindow(ctx);
+  return limit ? Math.min(max, Math.max(512, Math.floor(limit / 4))) : max;
 }
 
 
@@ -156,8 +172,18 @@ function answerTokens(ctx) {
 
 export function renderChat(body, ctx) {
   // Every book in the library, not just the translation being read's: an answer about
-  // John links it while the JPS is open, and Tobit while the WEB is
-  finder ??= referenceFinder([...new Map(ctx.state.bibles.flatMap((b) => b.books).map((b) => [b.name, b])).values()]);
+  // John links it while the JPS is open, and Tobit while the WEB is. Rebuilt if the
+  // panel was opened before the library's books (with their chapter counts) arrived.
+  if (finderBooks !== ctx.state.bibles) {
+    // Each book with the most chapters any translation gives it (Daniel has 14 in the
+    // Douay-Rheims, 12 in the KJV)
+    const books = new Map();
+    for (const b of ctx.state.bibles.flatMap((t) => t.books)) {
+      if (!(books.get(b.name)?.chapters >= b.chapters)) books.set(b.name, b);
+    }
+    finder = referenceFinder([...books.values()]);
+    finderBooks = ctx.state.bibles;
+  }
   const ai = ctx.settings.ai;
   if (!ai.providers.length) {
     chat.view = null;
@@ -212,13 +238,15 @@ export function renderChat(body, ctx) {
 
   const history = h("div", { class: "chat-history" });
   chat.view.history = history;
+  // Redrawn on its own when a model list arrives (see drawModelRow)
+  chat.view.modelRow = modelPicker(ctx);
 
   replace(
     body,
     h(
       "div",
       { class: "chat", "data-mode": chat.showHistory ? "history" : "chat" },
-      h("div", { class: "chat-top" }, modelPicker(ctx), budget),
+      h("div", { class: "chat-top" }, chat.view.modelRow, budget),
       h("div", { class: "chat-scroll" }, messages, jump),
       history,
       consent,
@@ -232,7 +260,8 @@ export function renderChat(body, ctx) {
   drawSend();
   drawConsent(ctx);
   refreshSize(ctx);
-  // Every provider's models, so any of them can be picked from the menu
+  // Every provider's models, so any of them can be picked from the menu (each is
+  // asked once: a failed list waits for Retry)
   for (const p of ai.providers) loadModels(ctx, { p });
   autosize(input);
   drawBudget(ctx);
@@ -357,18 +386,29 @@ function modelPicker(ctx) {
           { class: "chat-error small" },
           status.error,
           " ",
-          h("button", { type: "button", class: "text-button", onclick: () => loadModels(ctx, { force: true }) }, "Retry"),
+          h("button", { type: "button", class: "text-button", onclick: () => retryModels(ctx) }, "Retry"),
         )
       : null,
   );
 }
 
-/** Load a provider's models (the current one unless `p` is given). */
+/** Retry: ask again every provider whose list failed, and show them loading. */
+function retryModels(ctx) {
+  for (const p of ctx.settings.ai.providers) {
+    if (chat.models.get(p.id)?.error) loadModels(ctx, { p, force: true });
+  }
+  ctx.refreshPanel();
+}
+
+/**
+ * Load a provider's models (the current one unless `p` is given). Each provider is
+ * asked once: a list, or an error, stays until `force` (Retry) or the provider changes.
+ */
 function loadModels(ctx, { force = false, p = provider(ctx) } = {}) {
   if (!p) return Promise.resolve();
   const existing = chat.models.get(p.id);
   if (existing?.loading) return existing.loading;
-  if (existing?.list && !force) return Promise.resolve();
+  if (existing && !force) return Promise.resolve();
   const loading = (async () => {
     try {
       const list = await aiModels({ providerId: p.id, kind: p.kind, baseUrl: p.baseUrl });
@@ -382,10 +422,23 @@ function loadModels(ctx, { force = false, p = provider(ctx) } = {}) {
     } catch (error) {
       chat.models.set(p.id, { error: String(error.message ?? error) });
     }
-    if (ctx.state.panel === "chat") ctx.refreshPanel();
+    drawModelRow(ctx);
   })();
   chat.models.set(p.id, { loading });
   return loading;
+}
+
+/** Redraw just the model menu and what depends on it (the size meter, the buttons). */
+function drawModelRow(ctx) {
+  const v = chat.view;
+  if (!v?.modelRow?.isConnected) return;
+  const controls = (el) => [...el.querySelectorAll("select, button")];
+  const focused = controls(v.modelRow).indexOf(document.activeElement);
+  const row = modelPicker(ctx);
+  v.modelRow.replaceWith(row);
+  v.modelRow = row;
+  if (focused >= 0) controls(row)[focused]?.focus();
+  drawBudget(ctx); // the model's context window and answer limit may be known now
 }
 
 // ------------------------------------------------------------------ context
@@ -588,6 +641,8 @@ function fillMessage(ctx, node, m) {
     : m.reason === "length" && !m.content
       ? h("p", { class: "chat-note" }, "The model used its whole length limit thinking and didn’t reach an answer. Try again with “Think first” off, or ask a narrower question.")
     : m.reason === "length" ? h("p", { class: "chat-note" }, "The answer reached its length limit.")
+    // The stream ended without the service saying the answer was finished
+    : m.reason === "incomplete" ? h("p", { class: "chat-note" }, "The answer may be incomplete.")
     : m.reason === "refusal" ? h("p", { class: "chat-note" }, "The model declined to answer this.")
     : m.reason === "cancelled" ? h("p", { class: "chat-note" }, "Stopped.")
     : null;
@@ -668,6 +723,8 @@ function attachLive(node, m) {
   const thinking = node.querySelector(".msg-reasoning");
   const reasoningBody = thinking.querySelector(".msg-reasoning-body");
   if (!reasoningBody.firstChild) reasoningBody.append(document.createTextNode(""));
+  // A new answer starts afresh; a redrawn panel picks the same answer up where it was
+  if (live.message !== m) Object.assign(live, { message: m, answering: false, loopCheckedAt: 0 });
   Object.assign(live, {
     node,
     thinking,
@@ -690,16 +747,17 @@ function attachLive(node, m) {
 }
 
 let drawQueued = false;
-/** Update the answer being streamed, at most once per frame. */
-function drawStreaming(ctx) {
+/** Update `m`, the answer being streamed, at most once per frame. */
+function drawStreaming(ctx, m) {
   if (drawQueued) return;
   drawQueued = true;
   requestAnimationFrame(() => {
     drawQueued = false;
     const v = chat.view;
     if (!v) return;
-    const index = chat.messages.length - 1;
-    const m = chat.messages[index];
+    // Found by identity: if its conversation is no longer the one shown, draw nothing
+    const index = chat.messages.indexOf(m);
+    if (index < 0) return;
     const node = v.messages.querySelector(`[data-index="${index}"]`);
     if (!node) return drawMessages(ctx);
     if (live.node !== node) attachLive(node, m);
@@ -748,12 +806,16 @@ function patchChildren(target, fresh) {
   target.append(...next.slice(same));
 }
 
-/** The answer ended: add its status and tools without touching what's already shown. */
-function finishLive(ctx) {
+/** Answer `m` ended: add its status and tools without touching what's already shown. */
+function finishLive(ctx, m) {
   const v = chat.view;
   if (!v) return;
-  const index = chat.messages.length - 1;
-  const m = chat.messages[index];
+  const index = chat.messages.indexOf(m);
+  if (index < 0) {
+    // Its conversation was closed or deleted meanwhile: nothing of it is on screen
+    live.node = null;
+    return;
+  }
   const node = v.messages.querySelector(`[data-index="${index}"]`);
   if (!node) return drawMessages(ctx);
   if (live.node !== node) {
@@ -770,13 +832,25 @@ function finishLive(ctx) {
   v.follow.stick();
 }
 
+/** Shown on what can't be used while an answer streams into the open conversation. */
+const BUSY_TITLE = "Wait for the answer to finish, or stop it";
+
 function drawSend() {
   const v = chat.view;
   if (!v) return;
   const busy = !!chat.requestId;
   // Kept current here: it's drawn once, but the conversation changes under it
   const fresh = v.body.querySelector("[data-new-conversation]");
-  if (fresh) fresh.disabled = busy || (!chat.messages.length && !chat.showHistory);
+  if (fresh) {
+    fresh.disabled = busy || (!chat.messages.length && !chat.showHistory);
+    fresh.title = busy ? BUSY_TITLE : "New conversation";
+  }
+  // Another conversation can't be opened until the answer has ended (and been saved)
+  for (const b of v.history.querySelectorAll("[data-open-conversation]")) {
+    b.disabled = busy;
+    if (busy) b.title = BUSY_TITLE;
+    else b.removeAttribute("title");
+  }
   replace(v.sendButton, icon(busy ? "stop" : "send"));
   v.sendButton.setAttribute("aria-label", busy ? "Stop" : "Send");
   v.sendButton.title = busy ? "Stop" : "Send (Enter)";
@@ -947,7 +1021,12 @@ async function sendNow(ctx) {
             });
           }
         } else if (event.type === "done") answer.reason = event.reason;
-        drawStreaming(ctx);
+        else if (event.type === "textWasReasoning") {
+          // A late </think> revealed that what streamed so far was reasoning
+          answer.reasoning += answer.content;
+          answer.content = "";
+        }
+        drawStreaming(ctx, answer);
       },
     );
   } catch (error) {
@@ -956,7 +1035,7 @@ async function sendNow(ctx) {
     answer.content = answer.content.replace(/^\s+/, "");
     answer.streaming = false;
     chat.requestId = null;
-    finishLive(ctx);
+    finishLive(ctx, answer);
     drawSend();
     saveCurrent(ctx);
     drawBudget(ctx);
@@ -1057,6 +1136,7 @@ async function saveCurrent(ctx) {
 
 /** Open a saved conversation to read or continue. */
 async function openConversation(ctx, id) {
+  if (chat.requestId) return; // the streaming answer belongs to the open one (see drawSend)
   try {
     await stopAnswer();
     const c = await conversationLoad(id);
@@ -1119,7 +1199,14 @@ function row(ctx, c) {
       li,
       h(
         "button",
-        { type: "button", class: "row-button", onclick: () => openConversation(ctx, c.id) },
+        {
+          type: "button",
+          class: "row-button",
+          "data-open-conversation": "",
+          disabled: chat.requestId ? true : null,
+          title: chat.requestId ? BUSY_TITLE : null,
+          onclick: () => openConversation(ctx, c.id),
+        },
         h("span", { class: "grow" }, h("span", { class: "row-main" }, c.title), h("span", { class: "row-sub" }, sub)),
       ),
       h(
@@ -1246,13 +1333,18 @@ export function renderAiSettings(ctx) {
       aiKeyStatus(p.id).then((st) => {
         const el = document.querySelector(`[data-key-status="${p.id}"]`);
         if (!el) return;
-        const key = st.stored ? (st.storage === "file" ? "key saved in the app’s files" : "key in system keychain") : presetOf(p).keyOptional ? "no key" : "no key yet";
+        // A key bound to another address won't be sent here (st.origin is null for a key
+        // saved before keys were bound; it binds to this address on first use)
+        const elsewhere = st.stored && st.origin && st.origin !== originOf(p.baseUrl);
+        const key = !st.stored ? (presetOf(p).keyOptional ? "no key" : "no key yet")
+          : elsewhere ? `key saved for ${st.origin}: enter it again`
+          : st.storage === "file" ? "key saved in the app's files" : "key in system keychain";
         el.textContent = `${p.baseUrl} · ${key}`;
       }).catch(() => {});
     }
   });
   return [
-    h("p", { class: "setting-note" }, "Chat about the text with your own AI: a server on your network or an API key. Keys are kept in your system’s keychain and never leave this device except to the service they belong to."),
+    h("p", { class: "setting-note" }, "Chat about the text with your own AI: a server on your network or an API key. Keys stay on this device and go only to the address they were saved for, which the Ask panel also contacts on its own to list the models."),
     list,
     editing.form ? providerForm(ctx) : h("button", { type: "button", class: "button", onclick: () => {
       editing.form = { id: null, preset: "local", name: "", baseUrl: "", key: "", contextWindow: "" };
@@ -1311,36 +1403,52 @@ function providerForm(ctx) {
     autocapitalize: "off",
     spellcheck: "false",
   });
-  url.addEventListener("input", () => { f.baseUrl = url.value; });
-  const key = h("input", {
-    id: "provider-key",
-    type: "password",
-    value: f.key,
-    placeholder: f.id ? "Saved key kept unless you enter a new one" : preset.keyOptional ? "Optional" : "Paste your API key",
-    autocomplete: "off",
-    autocapitalize: "off",
-    spellcheck: "false",
-  });
+  const baseUrlNow = () => (fixedUrl ? preset.baseUrl : f.baseUrl).trim().replace(/\/+$/, "");
+  // A saved key only ever goes to the address it was saved for (the Rust side refuses
+  // any other), so a provider moved to another service or address needs it again
+  const saved = f.id ? ctx.settings.ai.providers.find((p) => p.id === f.id) : null;
+  const keyMoved = () => !!saved && (f.preset !== saved.preset || originOf(baseUrlNow()) !== originOf(saved.baseUrl));
+
+  const key = h("input", { id: "provider-key", type: "password", autocomplete: "off", autocapitalize: "off", spellcheck: "false" });
+  key.value = f.key; // the property, not the attribute: a typed key stays out of the markup
   key.addEventListener("input", () => { f.key = key.value; });
+  const keyHint = h("span", { class: "setting-hint" }, "The saved key goes only to the address it was saved for: enter it again for this one.");
+  const drawKey = () => {
+    const moved = keyMoved();
+    key.placeholder = moved
+      ? preset.keyOptional ? "Enter the key again (optional)" : "Enter the API key again"
+      : f.id ? "Saved key kept unless you enter a new one" : preset.keyOptional ? "Optional" : "Paste your API key";
+    key.required = moved && !preset.keyOptional;
+    keyHint.hidden = !moved;
+  };
+  drawKey();
+  url.addEventListener("input", () => {
+    f.baseUrl = url.value;
+    drawKey();
+  });
   const size = h("input", { id: "provider-context", type: "number", min: "1000", step: "1000", value: f.contextWindow ?? "", placeholder: "As reported by the service", inputmode: "numeric" });
   size.addEventListener("input", () => { f.contextWindow = size.value; });
 
   const save = async () => {
-    const baseUrl = (fixedUrl ? preset.baseUrl : f.baseUrl).trim().replace(/\/+$/, "");
+    const baseUrl = baseUrlNow();
     if (!/^https?:\/\/[^\s/]+/.test(baseUrl)) {
       f.status = "Enter the server's address, starting with http:// or https://";
       return ctx.refreshPanel();
     }
-    if (!f.id && !preset.keyOptional && !f.key.trim()) {
-      f.status = "Paste an API key for this service.";
+    const moved = keyMoved();
+    if ((!f.id || moved) && !preset.keyOptional && !f.key.trim()) {
+      f.status = moved ? "Enter the API key again: a saved key goes only to the address it was saved for." : "Paste an API key for this service.";
       return ctx.refreshPanel();
     }
     const id = f.id ?? `p${Date.now().toString(36)}`;
     const contextWindow = Number.parseInt(f.contextWindow, 10);
     try {
       if (f.key.trim()) {
-        const where = await aiKeySet(id, f.key);
+        const where = await aiKeySet(id, f.key, baseUrl);
         if (where === "file") ctx.toast("No system keychain found: the key is saved in the app’s private files");
+      } else if (moved) {
+        // The old key can't be used at the new address: forget it rather than keep it
+        await aiKeySet(id, "");
       }
     } catch (error) {
       f.status = String(error.message ?? error);
@@ -1377,19 +1485,20 @@ function providerForm(ctx) {
   const test = async () => {
     f.status = "Connecting…";
     status.textContent = f.status;
-    const baseUrl = (fixedUrl ? preset.baseUrl : f.baseUrl).trim().replace(/\/+$/, "");
-    // A newly typed key is tried under a throwaway id; otherwise the saved one
-    const typed = !!f.key.trim();
-    const id = typed || !f.id ? "__test__" : f.id;
+    const baseUrl = baseUrlNow();
+    // A typed key is tried as it is, never stored; without one, the saved key if it
+    // belongs to this address, or no key at all (apiKey "")
+    const typed = f.key.trim();
+    const useSaved = !typed && !!f.id && !keyMoved();
     try {
-      if (typed) await aiKeySet(id, f.key);
-      const list = await aiModels({ providerId: id, kind: preset.kind, baseUrl });
+      const list = await aiModels(
+        { providerId: useSaved ? f.id : "__test__", kind: preset.kind, baseUrl },
+        useSaved ? undefined : typed,
+      );
       const sizes = list.map((m) => m.contextWindow).filter(Boolean);
       f.status = `Connected. ${list.length} model${list.length === 1 ? "" : "s"}${sizes.length ? `, up to ${compactLimit(Math.max(...sizes))} tokens of context` : ""}.`;
     } catch (error) {
       f.status = String(error.message ?? error);
-    } finally {
-      if (typed) aiKeySet("__test__", "").catch(() => {});
     }
     status.textContent = f.status;
   };
@@ -1420,7 +1529,7 @@ function providerForm(ctx) {
     field("Service", presetSelect),
     field("Name", name),
     field("Address", url, preset.hint),
-    field("API key", key),
+    h("label", { class: "field" }, h("span", { class: "field-label" }, "API key"), key, keyHint),
     field("Context window (tokens)", size, "Only if the service doesn’t report it."),
     status,
     h(

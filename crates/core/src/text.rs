@@ -1,6 +1,36 @@
 //! Text helpers for search, highlighting, and display.
 
-pub use kjv_library::text::{find_folded as find_folded_ranges, fold as fold_for_search};
+use kjv_library::text::{find_folded, fold};
+
+/// Fold a query (or a verse) for search: case, apostrophes, "æ", and the rest as
+/// `kjv_library::text` folds them, with runs of whitespace as one space, so "God  so"
+/// finds "God so".
+pub fn fold_for_search(s: &str) -> String {
+    let mut out = fold(s);
+    let mut space = false;
+    out.retain(|c| {
+        let keep = !(c == ' ' && space);
+        space = c == ' ';
+        keep
+    });
+    out
+}
+
+/// Byte ranges in `haystack` where the folded `needle` occurs (non-overlapping); a run
+/// of whitespace in the needle counts as one space.
+pub fn find_folded_ranges(haystack: &str, needle: &str) -> Vec<(usize, usize)> {
+    let mut one = String::with_capacity(needle.len());
+    for c in needle.chars() {
+        if c.is_whitespace() {
+            if !one.ends_with(' ') {
+                one.push(' ');
+            }
+        } else {
+            one.push(c);
+        }
+    }
+    find_folded(haystack, &one)
+}
 
 /// A run of verse text with how to draw it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -32,11 +62,7 @@ pub fn segments(text: &str, red: &[(usize, usize)], hits: &[(usize, usize)]) -> 
         let (red, hit) = (covers(red, start), covers(hits, start));
         match out.last_mut() {
             Some(last) if last.red == red && last.hit == hit => last.text.push_str(&text[start..end]),
-            _ => out.push(Segment {
-                text: text[start..end].to_string(),
-                red,
-                hit,
-            }),
+            _ => out.push(Segment { text: text[start..end].to_string(), red, hit }),
         }
     }
     out
@@ -54,16 +80,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn folded_search_matches_apostrophe_and_ae() {
+        assert_eq!(fold_for_search("Moses\u{2019} seat"), fold_for_search("moses' SEAT"));
+        assert_eq!(fold_for_search("Cæsar"), "caesar");
+    }
+
+    #[test]
+    fn ranges_map_back_to_original_bytes() {
+        let text = "unto Cæsar the things which are Cæsar\u{2019}s";
+        let r = find_folded_ranges(text, "caesar's");
+        assert_eq!(r.len(), 1);
+        assert_eq!(&text[r[0].0..r[0].1], "Cæsar\u{2019}s");
+        let r = find_folded_ranges(text, "CAESAR");
+        assert_eq!(r.len(), 2);
+        assert_eq!(&text[r[0].0..r[0].1], "Cæsar");
+    }
+
+    #[test]
+    fn query_whitespace_collapses() {
+        assert_eq!(fold_for_search("God  so\t loved"), "god so loved");
+        let text = "For God so loved the world";
+        let r = find_folded_ranges(text, "God  so");
+        assert_eq!(r.iter().map(|&(s, e)| &text[s..e]).collect::<Vec<_>>(), ["God so"]);
+    }
+
+    #[test]
     fn segments_combine_red_and_hits() {
         let text = "And Jesus said, Follow me.";
         let red = [(16, 26)];
         let hits = [(20, 26)];
         let s = segments(text, &red, &hits);
         let parts: Vec<(&str, bool, bool)> = s.iter().map(|x| (x.text.as_str(), x.red, x.hit)).collect();
-        assert_eq!(
-            parts,
-            vec![("And Jesus said, ", false, false), ("Foll", true, false), ("ow me.", true, true)]
-        );
+        assert_eq!(parts, vec![("And Jesus said, ", false, false), ("Foll", true, false), ("ow me.", true, true)]);
         // No ranges: one plain segment
         assert_eq!(segments("plain", &[], &[]).len(), 1);
     }

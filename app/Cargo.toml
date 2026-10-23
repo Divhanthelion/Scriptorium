@@ -17,6 +17,8 @@ tauri-build = { version = "2", features = [] }
 kjv-core = { path = "../crates/core" }
 kjv-library = { path = "../crates/library", features = ["build"] }
 zstd = "0.13"
+ruzstd = "0.8"
+sha2 = "0.10"
 
 [dependencies]
 kjv-core = { path = "../crates/core" }

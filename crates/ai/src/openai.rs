@@ -3,10 +3,70 @@
 
 use serde_json::{Value, json};
 
-use crate::think::ThinkSplitter;
+use crate::think::{Piece, ThinkSplitter};
 use crate::{ChatRequest, Endpoint, Event, ModelInfo, Role, ToolCall, Usage, url};
 
-pub fn request(client: &reqwest::Client, req: &ChatRequest, usage_option: bool) -> reqwest::RequestBuilder {
+/// Which name the length limit goes by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Limit {
+    /// What most OpenAI-compatible servers know
+    MaxTokens,
+    /// What OpenAI wants (its reasoning models refuse `max_tokens`)
+    MaxCompletionTokens,
+    /// Neither: the server refused both
+    Omit,
+}
+
+/// How one try at a request is worded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Attempt {
+    /// Ask for token usage at the end (`stream_options`)
+    pub usage: bool,
+    pub limit: Limit,
+}
+
+impl Attempt {
+    pub fn first(endpoint: &Endpoint) -> Self {
+        let limit = if is_openai(&endpoint.base_url) { Limit::MaxCompletionTokens } else { Limit::MaxTokens };
+        Self { usage: true, limit }
+    }
+
+    /// What to try after the server answered this attempt with 400 and `body`, if the
+    /// body names something that can be left out or renamed. The length limit goes
+    /// from `first`'s name to the other one, then is dropped.
+    pub fn after_rejection(self, first: Attempt, body: &str, has_limit: bool) -> Option<Attempt> {
+        if self.usage && body.contains("stream_options") {
+            return Some(Attempt { usage: false, ..self });
+        }
+        if has_limit && (body.contains("max_tokens") || body.contains("max_completion_tokens")) {
+            let other = match first.limit {
+                Limit::MaxTokens => Limit::MaxCompletionTokens,
+                Limit::MaxCompletionTokens => Limit::MaxTokens,
+                Limit::Omit => return None,
+            };
+            let limit = if self.limit == first.limit {
+                other
+            } else if self.limit == other {
+                Limit::Omit
+            } else {
+                return None;
+            };
+            return Some(Attempt { limit, ..self });
+        }
+        None
+    }
+}
+
+fn is_openai(base_url: &str) -> bool {
+    crate::host_is(base_url, "api.openai.com")
+}
+
+/// DeepSeek's own API (not another service that hosts its models)
+fn is_deepseek(base_url: &str) -> bool {
+    crate::host_is(base_url, "api.deepseek.com")
+}
+
+pub fn body(req: &ChatRequest, attempt: Attempt) -> Value {
     let mut system = req.instructions.clone();
     if !req.context.is_empty() {
         // Stable text first so servers with prefix caching reuse it across turns
@@ -33,7 +93,7 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest, usage_option: bool) 
         }
     }
     let mut body = json!({"model": req.model, "messages": messages, "stream": true});
-    if usage_option {
+    if attempt.usage {
         body["stream_options"] = json!({"include_usage": true});
     }
     if !req.tools.is_empty() {
@@ -48,7 +108,11 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest, usage_option: bool) 
         }
     }
     if let Some(max) = req.max_tokens {
-        body["max_tokens"] = json!(max);
+        match attempt.limit {
+            Limit::MaxTokens => body["max_tokens"] = json!(max),
+            Limit::MaxCompletionTokens => body["max_completion_tokens"] = json!(max),
+            Limit::Omit => {}
+        }
     }
     if is_deepseek(&req.endpoint.base_url) {
         // DeepSeek V4 thinks by default; `thinking` turns it on or off, and
@@ -63,25 +127,25 @@ pub fn request(client: &reqwest::Client, req: &ChatRequest, usage_option: bool) 
         if let Some(on) = req.enable_thinking {
             body["chat_template_kwargs"] = json!({"enable_thinking": on});
         }
-        if let Some(effort) = &req.effort {
-            // OpenAI reasoning models; other servers ignore unknown fields or say so
-            if req.endpoint.base_url.contains("api.openai.com") {
-                body["reasoning_effort"] = json!(effort);
-            }
+        // OpenAI reasoning models; other servers ignore unknown fields or say so
+        if let Some(effort) = &req.effort
+            && is_openai(&req.endpoint.base_url)
+        {
+            body["reasoning_effort"] = json!(effort);
         }
     }
-    auth(client.post(url(&req.endpoint.base_url, "chat/completions")), &req.endpoint).json(&body)
+    body
 }
 
-/// DeepSeek's own API (not another service that hosts its models)
-fn is_deepseek(base_url: &str) -> bool {
-    base_url.contains("api.deepseek.com")
+pub fn request(client: &reqwest::Client, req: &ChatRequest, attempt: Attempt) -> reqwest::RequestBuilder {
+    auth(client.post(url(&req.endpoint.base_url, "chat/completions")), &req.endpoint).json(&body(req, attempt))
 }
 
 pub fn models_request(client: &reqwest::Client, endpoint: &Endpoint) -> reqwest::RequestBuilder {
     auth(client.get(url(&endpoint.base_url, "models")), endpoint)
 }
 
+/// `bearer_auth` marks the header sensitive.
 fn auth(request: reqwest::RequestBuilder, endpoint: &Endpoint) -> reqwest::RequestBuilder {
     match endpoint.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
         Some(key) => request.bearer_auth(key),
@@ -113,6 +177,7 @@ pub fn parse_models(json: &Value) -> Vec<ModelInfo> {
 #[derive(Default)]
 pub struct Decoder {
     think: ThinkSplitter,
+    /// The finish reason, once a chunk gives one (`[DONE]` follows it, usually)
     reason: Option<String>,
     /// The reply as it came, to send back with its tool calls: its text, its reasoning,
     /// and each call's id, name, and arguments (streamed in pieces, by index)
@@ -122,12 +187,20 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    fn emit_text(&mut self, reasoning: bool, text: String, emit: &mut dyn FnMut(Event)) {
-        if reasoning {
-            emit(Event::Reasoning { text });
-        } else {
-            self.text.push_str(&text);
-            emit(Event::Text { text });
+    fn send(&mut self, pieces: Vec<Piece>, emit: &mut dyn FnMut(Event)) {
+        for piece in pieces {
+            emit(match piece {
+                Piece::Text(text) => {
+                    self.text.push_str(&text);
+                    Event::Text { text }
+                }
+                Piece::Reasoning(text) => Event::Reasoning { text },
+                Piece::TextWasReasoning => {
+                    // What looked like the answer was its reasoning
+                    self.text.clear();
+                    Event::TextWasReasoning
+                }
+            });
         }
     }
 }
@@ -135,14 +208,19 @@ impl Decoder {
 impl crate::Decoder for Decoder {
     fn decode(&mut self, data: &str, emit: &mut dyn FnMut(Event)) -> Result<bool, String> {
         if data.trim() == "[DONE]" {
-            self.flush(emit);
+            let pieces = self.think.finish();
+            self.send(pieces, emit);
             emit(Event::Done { reason: self.reason.take().or(Some("stop".into())) });
             return Ok(true);
         }
         let Ok(chunk) = serde_json::from_str::<Value>(data) else {
             return Ok(false);
         };
-        if let Some(message) = chunk.pointer("/error/message").and_then(Value::as_str) {
+        if let Some(message) = chunk
+            .pointer("/error/message")
+            .or_else(|| chunk.get("error").filter(|e| e.is_string()))
+            .and_then(Value::as_str)
+        {
             return Err(format!("The model stopped with an error: {}", message));
         }
         if let Some(choice) = chunk.pointer("/choices/0") {
@@ -156,9 +234,8 @@ impl crate::Decoder for Decoder {
                 }
             }
             if let Some(text) = delta.get("content").and_then(Value::as_str) {
-                for (reasoning, text) in self.think.push(text) {
-                    self.emit_text(reasoning, text, emit);
-                }
+                let pieces = self.think.push(text);
+                self.send(pieces, emit);
             }
             // A tool call comes in pieces: its id and name first, then its arguments
             for piece in delta.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
@@ -205,14 +282,22 @@ impl crate::Decoder for Decoder {
         Ok(false)
     }
 
-    fn flush(&mut self, emit: &mut dyn FnMut(Event)) {
-        for (reasoning, text) in self.think.finish() {
-            self.emit_text(reasoning, text, emit);
+    /// No `[DONE]`: a finish reason still says the answer ended (some servers stop there).
+    fn flush(&mut self, emit: &mut dyn FnMut(Event)) -> bool {
+        let pieces = self.think.finish();
+        self.send(pieces, emit);
+        match self.reason.take() {
+            Some(reason) => {
+                emit(Event::Done { reason: Some(reason) });
+                true
+            }
+            None => false,
         }
     }
 
     fn take_round(&mut self) -> Option<(Value, String, Vec<ToolCall>)> {
-        let calls: Vec<(String, String, String)> = std::mem::take(&mut self.calls).into_iter().filter(|c| !c.1.is_empty()).collect();
+        let calls: Vec<(String, String, String)> =
+            std::mem::take(&mut self.calls).into_iter().filter(|c| !c.1.is_empty()).collect();
         if calls.is_empty() {
             return None;
         }
@@ -223,7 +308,8 @@ impl crate::Decoder for Decoder {
             .map(|(i, (id, name, args))| ToolCall {
                 id: if id.is_empty() { format!("call_{}", i) } else { id },
                 name,
-                arguments: serde_json::from_str(if args.trim().is_empty() { "{}" } else { &args }).unwrap_or(Value::Null),
+                arguments: serde_json::from_str(if args.trim().is_empty() { "{}" } else { &args })
+                    .unwrap_or(Value::Null),
             })
             .collect();
         let tool_calls: Vec<Value> = calls
@@ -243,56 +329,36 @@ impl crate::Decoder for Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Decoder as _, Round, Tool};
+    use crate::{Decoder as _, Kind, Message, Round, Tool};
 
     fn request_for(base_url: &str) -> ChatRequest {
-        ChatRequest {
-            endpoint: Endpoint { kind: crate::Kind::OpenAi, base_url: base_url.into(), api_key: None },
-            model: "m".into(),
-            instructions: "i".into(),
-            context: String::new(),
-            messages: Vec::new(),
-            max_tokens: Some(100),
-            effort: None,
-            thinking: false,
-            enable_thinking: None,
-            tools: Vec::new(),
-            plain_instructions: None,
-            context_window: None,
-            rounds: Vec::new(),
-            no_more_tools: false,
-        }
+        let mut req =
+            ChatRequest::new(Endpoint { kind: Kind::OpenAi, base_url: base_url.into(), api_key: None }, "m");
+        req.instructions = "i".into();
+        req.max_tokens = Some(100);
+        req
+    }
+
+    /// A one-question chat to `base_url` with a length limit and an effort
+    fn chat(base_url: &str) -> ChatRequest {
+        let mut req = request_for(base_url);
+        req.instructions = "Be brief.".into();
+        req.messages = vec![Message { role: Role::User, content: "Hi".into() }];
+        req.max_tokens = Some(1000);
+        req.effort = Some("low".into());
+        req
     }
 
     fn body_of(req: &ChatRequest) -> Value {
-        let built = request(&reqwest::Client::new(), req, true).build().unwrap();
-        serde_json::from_slice(built.body().unwrap().as_bytes().unwrap()).unwrap()
+        body(req, Attempt::first(&req.endpoint))
     }
 
-    /// The JSON body `request` sends for `base_url` with thinking and effort set
-    fn body(base_url: &str, thinking: Option<bool>, effort: Option<&str>) -> Value {
+    /// The JSON body sent to `base_url` with thinking and effort set
+    fn body_with(base_url: &str, thinking: Option<bool>, effort: Option<&str>) -> Value {
         let mut req = request_for(base_url);
         req.enable_thinking = thinking;
         req.effort = effort.map(String::from);
         body_of(&req)
-    }
-
-    #[test]
-    fn deepseek_takes_its_own_thinking_switch_and_effort() {
-        let b = body("https://api.deepseek.com/v1", Some(false), Some("low"));
-        assert_eq!(b["thinking"], json!({"type": "disabled"}));
-        assert_eq!(b["reasoning_effort"], json!("low"));
-        assert!(b.get("chat_template_kwargs").is_none());
-        let on = body("https://api.deepseek.com/v1", Some(true), None);
-        assert_eq!(on["thinking"], json!({"type": "enabled"}));
-        assert!(on.get("reasoning_effort").is_none());
-        // Left alone, DeepSeek's defaults apply
-        let default = body("https://api.deepseek.com/v1", None, None);
-        assert!(default.get("thinking").is_none() && default.get("reasoning_effort").is_none());
-        // A local server keeps its chat-template switch, and gets no effort
-        let local = body("http://192.168.1.20:8000/v1", Some(false), Some("low"));
-        assert_eq!(local["chat_template_kwargs"], json!({"enable_thinking": false}));
-        assert!(local.get("thinking").is_none() && local.get("reasoning_effort").is_none());
     }
 
     fn decode(d: &mut Decoder, lines: &[&str]) -> Vec<Event> {
@@ -301,6 +367,36 @@ mod tests {
             d.decode(l, &mut |e| events.push(e)).unwrap();
         }
         events
+    }
+
+    #[test]
+    fn request_sends_the_body_to_chat_completions() {
+        let req = chat("https://api.openai.com/v1");
+        let built = request(&reqwest::Client::new(), &req, Attempt::first(&req.endpoint)).build().unwrap();
+        assert_eq!(built.url().as_str(), "https://api.openai.com/v1/chat/completions");
+        let sent: Value = serde_json::from_slice(built.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(sent, body_of(&req));
+    }
+
+    #[test]
+    fn deepseek_takes_its_own_thinking_switch_and_effort() {
+        let b = body_with("https://api.deepseek.com/v1", Some(false), Some("low"));
+        assert_eq!(b["thinking"], json!({"type": "disabled"}));
+        assert_eq!(b["reasoning_effort"], json!("low"));
+        assert!(b.get("chat_template_kwargs").is_none());
+        let on = body_with("https://api.deepseek.com/v1", Some(true), None);
+        assert_eq!(on["thinking"], json!({"type": "enabled"}));
+        assert!(on.get("reasoning_effort").is_none());
+        // Left alone, DeepSeek's defaults apply
+        let default = body_with("https://api.deepseek.com/v1", None, None);
+        assert!(default.get("thinking").is_none() && default.get("reasoning_effort").is_none());
+        // A local server keeps its chat-template switch, and gets no effort
+        let local = body_with("http://192.168.1.20:8000/v1", Some(false), Some("low"));
+        assert_eq!(local["chat_template_kwargs"], json!({"enable_thinking": false}));
+        assert!(local.get("thinking").is_none() && local.get("reasoning_effort").is_none());
+        // Only DeepSeek itself, not a host that merely contains its name
+        let lookalike = body_with("https://api.deepseek.com.evil.example/v1", Some(false), Some("low"));
+        assert!(lookalike.get("thinking").is_none() && lookalike.get("reasoning_effort").is_none());
     }
 
     #[test]
@@ -327,6 +423,104 @@ mod tests {
                 Event::Done { reason: Some("stop".into()) },
             ]
         );
+    }
+
+    #[test]
+    fn flush_reports_a_finish_reason_given_without_done() {
+        let mut d = Decoder::default();
+        let mut events = Vec::new();
+        d.decode(r#"{"choices":[{"delta":{"content":"Amen"},"finish_reason":"length"}]}"#, &mut |e| events.push(e))
+            .unwrap();
+        assert!(d.flush(&mut |e| events.push(e)));
+        assert_eq!(events.last(), Some(&Event::Done { reason: Some("length".into()) }));
+        // With no finish reason, flush leaves the ending to the caller
+        assert!(!Decoder::default().flush(&mut |_| panic!("nothing to emit")));
+    }
+
+    #[test]
+    fn inline_reasoning_closed_without_opening_moves_to_reasoning() {
+        let mut d = Decoder::default();
+        let events = decode(
+            &mut d,
+            &[
+                r#"{"choices":[{"delta":{"content":"The user asks about John 11."}}]}"#,
+                r#"{"choices":[{"delta":{"content":"</think>\n\nJesus wept."}}]}"#,
+                "[DONE]",
+            ],
+        );
+        assert_eq!(
+            events,
+            vec![
+                Event::Text { text: "The user asks about John 11.".into() },
+                Event::TextWasReasoning,
+                Event::Text { text: "Jesus wept.".into() },
+                Event::Done { reason: Some("stop".into()) },
+            ]
+        );
+        // What was sent back with a tool call would be the answer alone
+        assert_eq!(d.text, "Jesus wept.");
+    }
+
+    #[test]
+    fn stream_errors_as_plain_strings_are_reported() {
+        let mut d = Decoder::default();
+        let err = d.decode(r#"{"error":"out of memory"}"#, &mut |_| {}).unwrap_err();
+        assert_eq!(err, "The model stopped with an error: out of memory");
+    }
+
+    #[test]
+    fn openai_itself_gets_max_completion_tokens() {
+        let first = Attempt::first(&chat("https://api.openai.com/v1").endpoint);
+        assert_eq!(first.limit, Limit::MaxCompletionTokens);
+        let b = body(&chat("https://api.openai.com/v1"), first);
+        assert_eq!((b["max_completion_tokens"].as_u64(), b.get("max_tokens")), (Some(1000), None));
+        assert_eq!(b["reasoning_effort"], "low");
+        for other in
+            ["https://api.deepseek.com/v1", "http://192.168.1.20:8000/v1", "https://api.openai.com.evil.example/v1"]
+        {
+            let first = Attempt::first(&chat(other).endpoint);
+            assert_eq!(first.limit, Limit::MaxTokens, "{}", other);
+            let b = body(&chat(other), first);
+            assert_eq!((b["max_tokens"].as_u64(), b.get("max_completion_tokens")), (Some(1000), None));
+        }
+        // OpenAI's effort goes to OpenAI only (DeepSeek takes its own: see above)
+        for other in ["http://192.168.1.20:8000/v1", "https://api.openai.com.evil.example/v1"] {
+            assert!(body_of(&chat(other)).get("reasoning_effort").is_none(), "{}", other);
+        }
+        let none = body(&chat("https://api.openai.com/v1"), Attempt { usage: false, limit: Limit::Omit });
+        assert!(none.get("max_tokens").is_none() && none.get("max_completion_tokens").is_none());
+        assert!(none.get("stream_options").is_none());
+    }
+
+    #[test]
+    fn rejections_change_one_thing_at_a_time() {
+        let openai = Attempt { usage: true, limit: Limit::MaxCompletionTokens };
+        let local = Attempt { usage: true, limit: Limit::MaxTokens };
+        let unsupported = r#"{"error":{"message":"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.","param":"max_tokens"}}"#;
+        let unknown = r#"{"object":"error","message":"[{'type': 'extra_forbidden', 'loc': ('body', 'max_completion_tokens'), 'msg': 'Extra inputs are not permitted'}]"}"#;
+        let usage = r#"{"error":{"message":"Unrecognized request argument supplied: stream_options"}}"#;
+        let other = r#"{"error":{"message":"model not found"}}"#;
+
+        // OpenAI: other name, then none
+        let second = openai.after_rejection(openai, unknown, true).unwrap();
+        assert_eq!(second, Attempt { usage: true, limit: Limit::MaxTokens });
+        let third = second.after_rejection(openai, unsupported, true).unwrap();
+        assert_eq!(third, Attempt { usage: true, limit: Limit::Omit });
+        assert_eq!(third.after_rejection(openai, unsupported, true), None);
+
+        // A local server: max_tokens first
+        let second = local.after_rejection(local, unsupported, true).unwrap();
+        assert_eq!(second.limit, Limit::MaxCompletionTokens);
+        assert_eq!(second.after_rejection(local, unknown, true).unwrap().limit, Limit::Omit);
+
+        // The usage option goes first, once
+        let no_usage = local.after_rejection(local, usage, true).unwrap();
+        assert_eq!(no_usage, Attempt { usage: false, limit: Limit::MaxTokens });
+        assert_eq!(no_usage.after_rejection(local, usage, true), None);
+
+        // No limit was sent, or the complaint is about something else: no retry
+        assert_eq!(local.after_rejection(local, unsupported, false), None);
+        assert_eq!(local.after_rejection(local, other, true), None);
     }
 
     #[test]
