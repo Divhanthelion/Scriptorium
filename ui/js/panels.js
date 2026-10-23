@@ -311,6 +311,7 @@ export function renderSettings(body, ctx) {
     h("h3", { class: "section-title" }, "Reading"),
     switchRow("Verse numbers", null, s.verseNumbers, (v) => set((x) => { x.verseNumbers = v; })),
     switchRow("Red letter", "Words of Christ in red", s.redLetter, (v) => set((x) => { x.redLetter = v; })),
+    switchRow("Follow along when listening", "Keeps the verse being read in view", s.audio.follow, (v) => set((x) => { x.audio.follow = v; })),
     h("h3", { class: "section-title" }, "Hebrew & Greek"),
     stepperRow("Hebrew & Greek size", ORIG_SCALES, s.origScale, percent, (v) => set((x) => { x.origScale = v; })),
     switchRow("Transliteration", null, s.translit, (v) => set((x) => { x.translit = v; })),

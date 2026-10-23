@@ -53,6 +53,12 @@ const PATHS = {
   starFilled: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" fill="currentColor"/>',
   pencil: '<path d="M4 20h4L18.5 9.5l-4-4L4 16z"/><path d="M13 7l4 4"/>',
   flag: '<path d="M5 21V4M5 4h12l-2.5 4.5L17 13H5"/>',
+  // The audio Bibles' player
+  listen: '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6.5" rx="1.5"/><rect x="17" y="14" width="4" height="6.5" rx="1.5"/>',
+  play: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
+  pause: '<rect x="6.5" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13.5" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/>',
+  previous: '<path d="M6.5 5.5v13"/><path d="M18 6.5l-8.5 5.5 8.5 5.5z" fill="currentColor"/>',
+  next: '<path d="M17.5 5.5v13"/><path d="M6 6.5l8.5 5.5L6 17.5z" fill="currentColor"/>',
 };
 
 /** An inline SVG icon; decorative unless given a label. */

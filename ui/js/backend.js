@@ -33,6 +33,18 @@ export async function copyText(text) {
   }
 }
 
+/** The recording of a chapter in translation `bible`, or null: { recording, reader,
+ * file, duration, verses: [[label, start seconds], ...] }. */
+export function audioChapter(bible, book, chapter) {
+  return call("audio_chapter", { bible, book, chapter });
+}
+
+/** Where the player loads a chapter's file from: the app's own audio protocol (the files
+ * ship with it), or the dev server's /audio/ in the browser preview. */
+export function audioUrl(file) {
+  return tauri ? tauri.core.convertFileSrc(file, "audio") : `/audio/${file}`;
+}
+
 /** Open a link in the system browser. */
 export function openExternal(url) {
   if (tauri) {

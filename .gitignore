@@ -29,3 +29,6 @@ app/gen/schemas/
 *.p12
 *.msix
 screens/
+
+# The audio Bibles themselves (see app/audio/README.md)
+/app/audio/*/

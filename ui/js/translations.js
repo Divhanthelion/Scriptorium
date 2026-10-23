@@ -1,9 +1,12 @@
 // Translation picker dialog: every translation in the library, grouped, with what
 // it is and the credit its licence asks for.
 
+import { call } from "./backend.js";
 import { h, icon, replace } from "./dom.js";
 
 let dialog, body;
+// Translations with an audio Bible, and who reads it
+const readers = new Map();
 let onPick = () => {};
 let picking = onPick;
 
@@ -17,6 +20,11 @@ export function initTranslations(pick) {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
   });
+  call("audio_recordings")
+    .then((list) => {
+      for (const r of list) for (const id of r.bibles) readers.set(id, r.reader);
+    })
+    .catch(() => {});
 }
 
 /** Show the picker with `current` (a translation id) marked. A pick goes to `pick`
@@ -36,7 +44,8 @@ export function openTranslations(bibles, current, { pick = null, title = "Transl
   const draw = () => {
     const q = filter.value.trim().toLowerCase();
     const matches = (b) =>
-      !q || b.abbr.toLowerCase().includes(q) || b.name.toLowerCase().includes(q) || b.year.toLowerCase().includes(q) || b.group.toLowerCase().includes(q);
+      !q || b.abbr.toLowerCase().includes(q) || b.name.toLowerCase().includes(q) || b.year.toLowerCase().includes(q) || b.group.toLowerCase().includes(q)
+      || (readers.has(b.id) && ("audio".includes(q) || "listen".includes(q)));
     const groups = [];
     for (const b of bibles.filter(matches)) {
       let g = groups.find((x) => x.name === b.group);
@@ -83,6 +92,7 @@ function item(b, current) {
         { class: "translation-text" },
         h("span", { class: "translation-name" }, b.name, h("span", { class: "translation-year" }, ` · ${b.year}`)),
         h("span", { class: "translation-about" }, b.about),
+        readers.has(b.id) ? h("span", { class: "translation-audio" }, icon("listen"), `Audio: read by ${readers.get(b.id)}`) : null,
       ),
     ),
   );

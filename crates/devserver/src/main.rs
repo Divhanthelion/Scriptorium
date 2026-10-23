@@ -121,6 +121,12 @@ fn main() {
 
 fn handle(state: &State, mut request: Request) {
     let url = request.url().to_string();
+    // The audio Bibles' chapter files, as the app's audio protocol serves them
+    if let Some(file) = url.strip_prefix("/audio/").map(|f| f.split('?').next().unwrap_or("").to_string()) {
+        let response = audio_response(&state.ui, &file, &request);
+        let _ = request.respond(response);
+        return;
+    }
     let Some(name) = url.strip_prefix("/api/").map(str::to_string) else {
         let response = if request.method() == &Method::Get {
             match static_path(&state.ui, &url).and_then(|p| std::fs::read(&p).ok().map(|b| (p, b))) {
@@ -243,6 +249,43 @@ fn handle(state: &State, mut request: Request) {
         Err(message) => Response::from_string(message).with_status_code(400),
     };
     let _ = request.respond(response);
+}
+
+/// A chapter file from `app/audio/` (beside `ui/`), whole or the byte range asked for.
+/// Only a recording's own chapter files are served.
+fn audio_response(ui: &Path, file: &str, request: &Request) -> Response<std::io::Cursor<Vec<u8>>> {
+    let not_found = || Response::from_data(Vec::new()).with_status_code(404);
+    if request.method() != &Method::Get || !kjv_core::audio::is_chapter_file(file) {
+        return not_found();
+    }
+    let path = ui.join("../app/audio").join(file);
+    let Ok(bytes) = std::fs::read(&path) else {
+        return not_found();
+    };
+    if bytes.is_empty() {
+        return not_found();
+    }
+    let len = bytes.len();
+    let range = request
+        .headers()
+        .iter()
+        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("range"))
+        .and_then(|h| h.value.as_str().strip_prefix("bytes="))
+        .and_then(|spec| spec.split_once('-'))
+        .and_then(|(a, b)| {
+            let start: usize = a.trim().parse().ok()?;
+            let end: usize = if b.trim().is_empty() { len.checked_sub(1)? } else { b.trim().parse::<usize>().ok()?.min(len - 1) };
+            (start <= end && start < len).then_some((start, end))
+        });
+    let ogg = header("Content-Type", "audio/ogg");
+    match range {
+        Some((start, end)) => Response::from_data(bytes[start..=end].to_vec())
+            .with_status_code(206)
+            .with_header(ogg)
+            .with_header(header("Accept-Ranges", "bytes"))
+            .with_header(header("Content-Range", &format!("bytes {}-{}/{}", start, end, len))),
+        None => Response::from_data(bytes).with_header(ogg).with_header(header("Accept-Ranges", "bytes")),
+    }
 }
 
 /// Refuse `/api/` requests that don't come from this server's own pages.

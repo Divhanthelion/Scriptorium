@@ -18,6 +18,8 @@ const chromePath = process.argv[2] || process.env.CHROME || "google-chrome";
 const profile = mkdtempSync(join(tmpdir(), "kjv-ui-"));
 const chrome = spawn(chromePath, [
   "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+  // The audio Bibles' player is started by the tests, not a person's tap
+  "--autoplay-policy=no-user-gesture-required",
   `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, "about:blank",
 ], { stdio: "ignore" });
 
@@ -388,12 +390,15 @@ await test("About and Licences: every work's licence and credit, and every packa
   $$(".about-actions .button").find((b) => b.textContent === "Licences").click();
   await until(() => $("#licences")?.open && $$(".licence-group").length, "licences");
   const sections = $$(".licence-section .section-title").map((t) => t.textContent);
-  assert(sections.join() === "Scriptorium,Bible translations,Commentaries,Cross-references,Hebrew, Aramaic, Greek, and the KJV,Fonts,Open-source software", "sections: " + sections);
+  assert(sections.join() === "Scriptorium,Bible translations,Audio Bibles,Commentaries,Cross-references,Hebrew, Aramaic, Greek, and the KJV,Fonts,Open-source software", "sections: " + sections);
   // Every translation, commentary, and collection appears once, under its licence
   const works = (title) => [...$$(".licence-section").find((s) => s.querySelector(".section-title").textContent === title).querySelectorAll(".licence-works li")];
   assert(works("Bible translations").length === 44, "44 translations: " + works("Bible translations").length);
   assert(works("Commentaries").length === 11, "11 commentaries: " + works("Commentaries").length);
   assert(works("Cross-references").length === 2, "2 collections");
+  // The audio Bibles: who reads which translation, each under its licence
+  const audio = works("Audio Bibles").map((li) => li.textContent);
+  assert(audio.length === 2 && audio.some((t) => t.startsWith("BSB · read by Bob Souer") && t.includes("CC0")) && audio.some((t) => t.startsWith("WEB-Y · read by Winfred W. Henson")), "the readers: " + audio);
   const nc = $$(".licence-group").find((g) => g.querySelector(".licence-name").textContent.startsWith("CC BY-NC-ND 4.0"));
   assert(nc.querySelector(".licence-asks").textContent.includes("not for commercial use"), "what NC-ND asks");
   assert([...nc.querySelectorAll(".licence-work")].some((w) => w.textContent.startsWith("WYC ")), "Wycliffe under NC-ND");
@@ -832,6 +837,55 @@ await test("Translations: the KJV keeps its interlinear and gains the Apocrypha"
   $$(".chapter-grid button").find((b) => b.textContent === "1").click();
   await until(() => $("#ref-label").textContent === "John 1" && $("#reader").getAttribute("aria-busy") === "false", "John 1");
   assert($(".word") || visible($("[data-view-switch]")), "back in the KJV's own reader");
+`);
+
+// ------------------------------------------------------------------ audio Bibles
+
+// (CI has only 3 John's recording: tests/ui/fixtures/audio, copied into app/audio)
+await test("Listen: the BSB read aloud, verse by verse, from any verse", "book=Third%20John&chapter=1&tr=bsb", {}, `
+  await until(() => !$("#listen-button").hidden, "Listen is offered for the BSB");
+  assert($("#listen-button").getAttribute("aria-label") === "Listen to 3 John 1, read by Bob Souer", "named: " + $("#listen-button").getAttribute("aria-label"));
+  const audio = $("audio");
+  // From verse 5, through the verse bar
+  $("#v5").click();
+  await until(() => !$('#verse-actions [data-action="listen"]').hidden, "Listen in the verse bar");
+  $('#verse-actions [data-action="listen"]').click();
+  await until(() => !$("#player").hidden && !audio.paused && audio.currentTime > 0, "playing", 15000);
+  await until(() => $(".verse.is-heard")?.id === "v5", "verse 5 is the one being read: " + $(".verse.is-heard")?.id);
+  assert($(".player-title").textContent === "3 John 1", "the player names the chapter: " + $(".player-title").textContent);
+  assert($(".player-sub").textContent.startsWith("Bob Souer · "), "and the reader: " + $(".player-sub").textContent);
+  assert($("#app").dataset.player === "open" && $("#listen-button").classList.contains("is-playing"), "the Listen button shows it's playing");
+  // The next verse, from the player
+  $('#player [aria-label="Next verse"]').click();
+  await until(() => $(".verse.is-heard")?.id === "v6", "on to verse 6: " + $(".verse.is-heard")?.id);
+  // Faster, and round to normal again (remembered between tests)
+  $(".player-speed").click();
+  assert(audio.playbackRate === 1.25 && $(".player-speed").textContent === "1.25×", "faster: " + audio.playbackRate);
+  for (let i = 0; i < 5; i++) $(".player-speed").click();
+  assert(audio.playbackRate === 1 && $(".player-speed").textContent === "1×", "back to normal: " + audio.playbackRate);
+  // Pause with the Listen button; then stop
+  $("#listen-button").click();
+  await until(() => audio.paused, "paused");
+  $('#player [aria-label="Stop and close the player"]').click();
+  assert($("#player").hidden && !$(".verse.is-heard") && $("#app").dataset.player === "closed", "closed, nothing marked");
+  // A chapter that won't load, of a recording that has played: said so, and the
+  // recording is still offered (only one that never loads is taken for missing)
+  $("#listen-button").click();
+  await until(() => !audio.paused && audio.currentTime > 0, "playing again", 15000);
+  audio.src = "/audio/bsb-souer/3JN.99.ogg";
+  await until(() => $("#player").hidden, "the player closes");
+  assert($("#toast").textContent === "Couldn’t play 3 John 1", "said so: " + $("#toast").textContent);
+  await wait(300);
+  assert(!$("#listen-button").hidden, "Listen is still offered");
+`);
+
+await test("Listen: no Listen for a translation without a recording", "book=John&chapter=3&tr=kjv", {}, `
+  await until(() => $("#ref-label").textContent === "John 3" && $("#reader").getAttribute("aria-busy") === "false", "John 3");
+  await wait(500);
+  assert($("#listen-button").hidden, "the KJV has no recording yet");
+  $("#v16").click();
+  await until(() => !$("#verse-actions").hidden, "verse bar");
+  assert($('#verse-actions [data-action="listen"]').hidden, "nor in the verse bar");
 `);
 
 const NOTES_HELPERS = `

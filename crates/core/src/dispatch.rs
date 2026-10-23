@@ -126,6 +126,12 @@ pub fn dispatch_all(
             let a: BibleChapterArgs = parse(name, args)?;
             to_json(crate::translations::chapter(library, &a.bible, &a.book, a.chapter)?)
         }
+        // The audio Bibles shipped with the app, and one chapter's recording and timings
+        "audio_recordings" => to_json(crate::audio::recordings()),
+        "audio_chapter" => {
+            let a: BibleChapterArgs = parse(name, args)?;
+            to_json(crate::audio::chapter(&a.bible, &a.book, a.chapter))
+        }
         "commentaries" => to_json(library.commentaries()),
         "crossref_collections" => to_json(library.crossrefs()),
         "notes" => {

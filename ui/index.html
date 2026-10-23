@@ -22,6 +22,7 @@
           <span class="visually-hidden">Translation: </span><span id="translation-label">KJV</span>
           <span class="ref-caret" aria-hidden="true"></span>
         </button>
+        <button class="icon-btn listen-button" id="listen-button" type="button" aria-label="Listen" title="Listen" hidden></button>
         <div class="view-switch desktop-only" role="radiogroup" aria-label="View" data-view-switch></div>
         <div class="topbar-spacer"></div>
         <nav class="desktop-tools desktop-only" aria-label="Tools">
@@ -56,6 +57,7 @@
 
     <div class="verse-actions" id="verse-actions" role="toolbar" aria-label="Verse actions" hidden>
       <span class="verse-actions-ref" id="verse-actions-ref"></span>
+      <button type="button" class="action" data-action="listen" hidden></button>
       <button type="button" class="action" data-action="bookmark"></button>
       <button type="button" class="action" data-action="notes"></button>
       <button type="button" class="action" data-action="xrefs"></button>
@@ -63,6 +65,8 @@
       <button type="button" class="action" data-action="copy-chapter"></button>
       <button type="button" class="icon-btn" data-action="deselect" aria-label="Close verse actions"></button>
     </div>
+
+    <div class="player" id="player" role="region" aria-label="Listen" hidden></div>
 
     <nav class="tabbar mobile-only" aria-label="Sections">
       <button type="button" class="tab" data-tab="read"></button>
