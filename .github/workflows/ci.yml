@@ -48,7 +48,7 @@ jobs:
           KJV_SOURCE: ${{ runner.temp }}/eng-kjv_vpl.txt
           KJV_USFM: ${{ runner.temp }}/usfm
       # Packing a recording for download
-      - run: cargo test --release -p kjv-import --lib audio::
+      - run: cargo test --release -p kjv-import --lib audio::tests
       # The library: catalogue, alignment, cross-references, search index
       - run: cargo test --release -p kjv-library --features build
 
