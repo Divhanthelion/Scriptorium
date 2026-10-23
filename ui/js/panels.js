@@ -5,6 +5,7 @@ import { h, icon, plural, replace, timeAgo } from "./dom.js";
 import { renderAiSettings } from "./chat.js";
 import { APP } from "./brand.js";
 import { openLicences } from "./licences.js";
+import * as downloads from "./downloads.js";
 import { ORIG_SCALES, TEXT_SCALES } from "./settings.js";
 
 /**
@@ -303,6 +304,114 @@ function stepperRow(label, values, value, format, onChange) {
 }
 
 
+// ------------------------------------------------------------------ settings: audio Bibles
+
+/** Each recording: download it (only ever when asked), see it arrive, cancel, delete.
+ * Kept current while it's on screen; a row keeps its elements as it changes, so a button
+ * being used keeps its focus. */
+function audioSettings(ctx) {
+  const box = h("div", { class: "audio-settings" });
+  const rows = new Map();
+  // Recordings whose Delete waits to be confirmed
+  const asking = new Set();
+  const abbr = (id) => ctx.state.bibles.find((b) => b.id === id)?.abbr ?? id.toUpperCase();
+  const note = h("p", { class: "small muted audio-note" }, "Downloaded from the app’s page on GitHub, only when you ask, and kept on this device. Every file is checked before it plays.");
+  const act = (fn) => async () => {
+    try {
+      await fn();
+    } catch (error) {
+      ctx.toast(String(error?.message ?? error), 6000);
+    }
+    draw();
+  };
+
+  function makeRow(r) {
+    const hint = h("span", { class: "setting-hint" });
+    const error = h("span", { class: "setting-hint audio-error" });
+    const progress = h("progress", { class: "audio-progress", max: "1", value: "0", "aria-label": `Downloading ${r.reader}’s reading` });
+    const actions = h("div", { class: "audio-actions" });
+    const label = h("span", { class: "setting-label" }, `${r.bibles.map(abbr).join(", ")}, read by ${r.reader}`, hint, error, progress);
+    const el = h("div", { class: "setting audio-row", dataset: { recording: r.recording } }, label, actions);
+    return { el, hint, error, progress, actions, confirm: h("div", { class: "audio-confirm" }), shape: null };
+  }
+
+  function buttons(r, shape) {
+    const id = r.recording;
+    const retry = Boolean(r.download?.error);
+    const get = (label) => h("button", { type: "button", class: "button", onclick: act(() => downloads.download(id)) }, icon("download"), label);
+    const del = h("button", { type: "button", class: "button", onclick: () => (asking.add(id), draw()) }, "Delete");
+    if (shape === "running") return [h("button", { type: "button", class: "button", onclick: act(() => downloads.cancel(id)) }, "Cancel")];
+    if (shape === "empty") return [get(retry ? "Try again" : "Download")];
+    if (shape === "partial") return [get(retry ? "Try again" : "Download the rest"), del];
+    if (shape === "whole") return [del];
+    return [];
+  }
+
+  function update(row, r) {
+    const d = r.download;
+    const shape = r.included ? "included" : !d ? "none" : d.running ? "running" : d.have === 0 ? "empty" : d.have < d.size ? "partial" : "whole";
+    const book = d?.books.find((b) => b.code === d.book);
+    row.hint.textContent = {
+      included: "Comes with this app",
+      running: `Downloading${book ? ` ${book.name}` : ""} · ${downloads.size((d?.have ?? 0) + (d?.partial ?? 0))} of ${downloads.size(d?.size ?? 0)}`,
+      empty: `Not downloaded · ${downloads.size(d?.size ?? 0)}`,
+      partial: d ? `${downloads.booksHere(d)} of ${d.books.length} books · ${downloads.size(d.have)} on this device` : "",
+      whole: `On this device · ${downloads.size(d?.size ?? 0)}`,
+      none: "",
+    }[shape];
+    row.error.textContent = shape !== "running" && d?.error ? d.error : "";
+    row.error.hidden = !row.error.textContent;
+    row.progress.hidden = shape !== "running";
+    if (shape === "running") row.progress.value = String((d.have + d.partial) / d.size);
+    const key = `${shape}|${Boolean(d?.error)}|${asking.has(r.recording)}`;
+    if (row.shape === key) return;
+    row.shape = key;
+    replace(row.actions, ...buttons(r, shape));
+    replace(
+      row.confirm,
+      asking.has(r.recording) && d
+        ? [
+            h("span", { class: "grow" }, `Delete ${r.reader}’s reading (${downloads.size(d.have)}) from this device? You can download it again.`),
+            h("button", { type: "button", class: "button danger", onclick: act(async () => {
+              asking.delete(r.recording);
+              await downloads.remove(r.recording);
+            }) }, "Delete"),
+            h("button", { type: "button", class: "button", onclick: () => (asking.delete(r.recording), draw()) }, "Keep it"),
+          ]
+        : [],
+    );
+  }
+
+  function draw() {
+    const list = downloads.recordings().filter((r) => r.included || r.download);
+    const children = [];
+    for (const r of list) {
+      if (!rows.has(r.recording)) rows.set(r.recording, makeRow(r));
+      const row = rows.get(r.recording);
+      update(row, r);
+      children.push(row.el);
+      if (asking.has(r.recording)) children.push(row.confirm);
+    }
+    if (!list.length) children.push(h("p", { class: "empty" }, "None in this build of the app."));
+    else children.push(note);
+    if (children.length !== box.children.length || children.some((c, i) => box.children[i] !== c)) replace(box, ...children);
+  }
+
+  // Redrawn as the downloads change, until the panel is drawn afresh
+  let seen = false;
+  const stop = downloads.onChange(() => {
+    if (!box.isConnected) {
+      if (seen) stop();
+      return;
+    }
+    seen = true;
+    draw();
+  });
+  draw();
+  downloads.refresh();
+  return box;
+}
+
 export function renderSettings(body, ctx) {
   const s = ctx.settings;
   const set = (mutator) => {
@@ -322,6 +431,8 @@ export function renderSettings(body, ctx) {
     h("h3", { class: "section-title" }, "Reading"),
     switchRow("Verse numbers", null, s.verseNumbers, (v) => set((x) => { x.verseNumbers = v; })),
     switchRow("Red letter", "Words of Christ in red", s.redLetter, (v) => set((x) => { x.redLetter = v; })),
+    h("h3", { class: "section-title", "data-section": "audio" }, "Audio Bibles"),
+    audioSettings(ctx),
     switchRow("Follow along when listening", "Keeps the verse being read in view", s.audio.follow, (v) => set((x) => { x.audio.follow = v; })),
     h("h3", { class: "section-title" }, "Hebrew & Greek"),
     stepperRow("Hebrew & Greek size", ORIG_SCALES, s.origScale, percent, (v) => set((x) => { x.origScale = v; })),

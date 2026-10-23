@@ -3,6 +3,11 @@
 //! on Windows in Credential Manager (see `keychain`), so they outlast a restart.
 //! AI replies stream back as one JSON event per line.
 //!
+//! Audio Bibles downloaded in the preview go to a fresh folder each run, from GitHub as
+//! in the app; with SCRIPTORIUM_AUDIO_HOST=test, from this server's own stand-in for
+//! GitHub at `/test-releases/` (`tests/ui/fixtures/audio-releases/`: the UI tests' 3 John),
+//! or from the address SCRIPTORIUM_AUDIO_HOST gives.
+//!
 //! Only its own pages may call `/api/`: a request must name localhost or 127.0.0.1 at
 //! this server's port as its Host (a DNS-rebinding page names its own), come from no
 //! Origin or this server's own, and be a JSON POST (which a page on another site
@@ -20,6 +25,7 @@ use kjv_ai::{Event, ToolCall, ToolOutput};
 use kjv_ai::assistant::{AskArgs, ModelsArgs};
 use kjv_ai::conversations::Conversations;
 use kjv_ai::keys;
+use kjv_audio::{Downloads, Host, Store};
 use kjv_core::bundle::DataBundle;
 use kjv_core::dispatch::dispatch_all;
 use kjv_library::Library;
@@ -50,6 +56,9 @@ struct State {
     runtime: tokio::runtime::Runtime,
     client: kjv_ai::Client,
     conversations: Conversations,
+    downloads: Arc<Downloads>,
+    /// The stand-in for GitHub's releases
+    releases: PathBuf,
 }
 
 fn content_type(path: &Path) -> &'static str {
@@ -109,6 +118,15 @@ fn main() {
         conversations: Conversations::new(
             std::env::temp_dir().join(format!("kjv-devserver-conversations-{}", std::process::id())),
         ),
+        downloads: Arc::new(Downloads::new(
+            Store::new(std::env::temp_dir().join(format!("kjv-devserver-audio-{}", std::process::id()))),
+            match std::env::var("SCRIPTORIUM_AUDIO_HOST").ok().as_deref() {
+                None | Some("") => Host::github(),
+                Some("test") => Host::stand_in(&format!("http://127.0.0.1:{}/test-releases", port)).expect("a URL"),
+                Some(base) => Host::stand_in(base).expect("SCRIPTORIUM_AUDIO_HOST is a URL"),
+            },
+        )),
+        releases: root.join("tests/ui/fixtures/audio-releases"),
     });
     eprintln!("Preview at http://localhost:{}", port);
 
@@ -121,9 +139,18 @@ fn main() {
 
 fn handle(state: &State, mut request: Request) {
     let url = request.url().to_string();
-    // The audio Bibles' chapter files, as the app's audio protocol serves them
+    // The audio Bibles' chapter files, as the app's audio protocol serves them: downloaded,
+    // or shipped beside the app
     if let Some(file) = url.strip_prefix("/audio/").map(|f| f.split('?').next().unwrap_or("").to_string()) {
-        let response = audio_response(&state.ui, &file, &request);
+        let path = kjv_core::audio::is_chapter_file(&file)
+            .then(|| state.downloads.store().find(&file).unwrap_or_else(|| state.ui.join("../app/audio").join(&file)));
+        let response = ranged_response(path, &request);
+        let _ = request.respond(response);
+        return;
+    }
+    // The stand-in for GitHub's releases (SCRIPTORIUM_AUDIO_HOST=test)
+    if let Some(rest) = url.strip_prefix("/test-releases") {
+        let response = ranged_response(static_path(&state.releases, rest), &request);
         let _ = request.respond(response);
         return;
     }
@@ -242,6 +269,23 @@ fn handle(state: &State, mut request: Request) {
             keychain::delete(&a.provider_id);
             Value::Null
         }),
+        "audio_downloads" => {
+            let shipped = |id: &str| state.ui.join("../app/audio").join(id).join("GEN.1.ogg").is_file();
+            Ok(json!(state.downloads.recordings(shipped)))
+        }
+        "audio_download" => parse::<WantArgs>(args).and_then(|a| {
+            if let Some(work) = state.downloads.start(&a.want)? {
+                state.runtime.spawn(work);
+            }
+            Ok(Value::Null)
+        }),
+        "audio_cancel" => parse::<RecordingArgs>(args).map(|a| {
+            state.downloads.cancel(&a.recording);
+            Value::Null
+        }),
+        "audio_delete" => {
+            parse::<RecordingArgs>(args).and_then(|a| state.downloads.delete(&a.recording).map(|()| Value::Null))
+        }
         _ => dispatch_all(&state.data, &state.library, &name, args),
     };
     let response = match result {
@@ -251,14 +295,13 @@ fn handle(state: &State, mut request: Request) {
     let _ = request.respond(response);
 }
 
-/// A chapter file from `app/audio/` (beside `ui/`), whole or the byte range asked for.
-/// Only a recording's own chapter files are served.
-fn audio_response(ui: &Path, file: &str, request: &Request) -> Response<std::io::Cursor<Vec<u8>>> {
+/// An Ogg file (a chapter, or a book in the stand-in release), whole or the byte range
+/// asked for.
+fn ranged_response(path: Option<PathBuf>, request: &Request) -> Response<std::io::Cursor<Vec<u8>>> {
     let not_found = || Response::from_data(Vec::new()).with_status_code(404);
-    if request.method() != &Method::Get || !kjv_core::audio::is_chapter_file(file) {
+    let Some(path) = path.filter(|_| request.method() == &Method::Get) else {
         return not_found();
-    }
-    let path = ui.join("../app/audio").join(file);
+    };
     let Ok(bytes) = std::fs::read(&path) else {
         return not_found();
     };
@@ -381,6 +424,16 @@ struct KeyArgs {
     key: Option<String>,
     #[serde(default)]
     base_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WantArgs {
+    want: kjv_audio::Want,
+}
+
+#[derive(Deserialize)]
+struct RecordingArgs {
+    recording: String,
 }
 
 #[derive(Deserialize)]

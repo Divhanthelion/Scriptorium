@@ -1,10 +1,13 @@
 // The audio Bibles: plays the chapter being read, marks each verse as it's read (and
-// keeps it in view), starts at any verse, and carries on into the next chapter. The
-// recordings ship with the app, one file per chapter; nothing is downloaded. Each
-// chapter's verse timings come with its recording (`audio_chapter`).
+// keeps it in view), starts at any verse, and carries on into the next chapter. A
+// recording is downloaded when the reader asks for it (downloads.js): Listen on a book
+// that isn't here yet offers that book or the whole Bible, and plays as soon as the
+// chapter has arrived and been checked. Each chapter's verse timings come with its
+// recording (`audio_chapter`).
 
 import { audioChapter, audioUrl } from "./backend.js";
 import { h, icon, replace } from "./dom.js";
+import * as downloads from "./downloads.js";
 import { AUDIO_SPEEDS } from "./settings.js";
 
 const $ = (id) => document.getElementById(id);
@@ -21,14 +24,13 @@ const player = {
   open: false,
   // The chapter ended and the next is being opened: play it when it's shown
   advancing: false,
+  // A chapter the reader asked to hear that is still downloading, and where in it to
+  // start: { s (as shown), at }
+  waiting: null,
   // The verse element marked as being read, and its index in the timings
   heard: null,
   heardIndex: -1,
   userScrolled: 0,
-  // Recordings whose files aren't in this build (a development build, say), and those
-  // a chapter of has played: their files are there
-  missing: new Set(),
-  found: new Set(),
   ui: null,
 };
 const cache = new Map();
@@ -37,12 +39,18 @@ let ctx = null;
 const keyOf = (bible, book, chapter) => `${bible}|${book}|${chapter}`;
 const firstNumber = (label) => parseInt(label, 10);
 
-/** The recording of a chapter, or null (asked once per chapter). */
-function infoFor(bible, book, chapter) {
+/** The recording of a chapter, or null: none, or none that can be had here (asked once
+ * per chapter). */
+async function infoFor(bible, book, chapter) {
   const key = keyOf(bible, book, chapter);
   if (!cache.has(key)) cache.set(key, audioChapter(bible, book, chapter).catch(() => null));
-  return cache.get(key).then((info) => (info && !player.missing.has(info.recording) ? info : null));
+  const info = await cache.get(key);
+  await downloads.loaded();
+  return info && downloads.offered(info.recording) ? info : null;
 }
+
+/** "here", "coming" (downloading), "missing" (can be downloaded), or "none". */
+const stateOf = (info) => downloads.chapterState(info.recording, info.code, info.chapter);
 
 /** "4:05", "1:02:10" */
 function clock(seconds) {
@@ -66,11 +74,14 @@ export function initListen(context) {
   audio.addEventListener("pause", draw);
   audio.addEventListener("ended", onEnded);
   audio.addEventListener("error", onError);
-  audio.addEventListener("loadedmetadata", () => {
-    if (player.loaded) player.found.add(player.loaded.info.recording);
-    draw();
-  });
+  audio.addEventListener("loadedmetadata", draw);
   document.body.append(audio);
+  downloads.onChange(onDownloads);
+  const ask = $("listen-ask");
+  // A tap outside the question closes it
+  ask.addEventListener("click", (event) => {
+    if (event.target === ask) ask.close();
+  });
 
   const button = $("listen-button");
   button.append(icon("listen"));
@@ -142,18 +153,18 @@ export async function chapterShown() {
     onTime();
     return;
   }
-  if (player.advancing) {
-    player.advancing = false;
-    if (info) load(player.shown, { play: true });
-    else close();
-    return;
-  }
-  if (player.open) {
-    // The reader turned to another chapter: the player goes with them (playing on if
-    // it was playing), or closes where there's no recording
-    if (info) load(player.shown, { play: !player.audio.paused });
-    else close();
-  }
+  if (player.waiting?.s.key === key) return;
+  const advancing = player.advancing;
+  player.advancing = false;
+  if (!advancing && !player.open) return;
+  // The reader turned to another chapter, or the last one ended: the player goes with
+  // them (playing on if it was playing, or waiting for it to download), or closes where
+  // there's nothing to play
+  const play = advancing || Boolean(player.waiting) || !player.audio.paused;
+  const state = info ? stateOf(info) : "none";
+  if (state === "here") load(player.shown, { play });
+  else if (state === "coming" && play) wait(player.shown, 0);
+  else close();
 }
 
 /** The verse bar's Listen button: shown when the chapter has a recording. */
@@ -162,16 +173,116 @@ export function syncVerseAction() {
   if (action) action.hidden = !player.shown?.info;
 }
 
-/** Play the chapter on screen from verse `n` (0: the beginning). */
+/** Play the chapter on screen from verse `n` (0: the beginning): at once if it's here,
+ * once it arrives if it's downloading, or after asking to download it. */
 export function playFrom(n) {
   const s = player.shown;
   if (!s?.info) return;
-  load(s, { at: n ? startOf(s.info, n) : 0, play: true });
+  const at = n ? startOf(s.info, n) : 0;
+  const state = stateOf(s.info);
+  if (state === "here") load(s, { at, play: true });
+  else if (state === "coming") {
+    // Waiting behind other books (the whole Bible downloading): it goes next
+    const { r, d, book } = whereIn(s);
+    if (d.book !== book.code) downloads.download(r.recording, { books: [book.code], from: { book: book.code, chapter: s.info.chapter } }).catch(() => {});
+    wait(s, at);
+  } else if (state === "missing") ask(s, at);
 }
 
 function startOf(info, n) {
   const v = info.verses.find(([label]) => firstNumber(label) >= n);
   return v ? v[1] : 0;
+}
+
+// ------------------------------------------------------------------ downloading
+
+/** What of a recording `s` reads from, and the book it's in. */
+function whereIn(s) {
+  const r = downloads.recording(s.info.recording);
+  const d = r?.download;
+  return { r, d, book: d?.books.find((b) => b.code === s.info.code) };
+}
+
+/** Listen on a book that isn't here: download it, or the whole Bible, or not now. */
+function ask(s, at) {
+  const { r, d, book } = whereIn(s);
+  if (!book) return;
+  const dialog = $("listen-ask");
+  const abbr = ctx.state.bibles.find((b) => b.id === s.bible)?.abbr ?? s.bible.toUpperCase();
+  const go = async (books) => {
+    dialog.close();
+    try {
+      await downloads.download(r.recording, { books, from: { book: book.code, chapter: s.info.chapter } });
+      wait(s, at);
+    } catch (error) {
+      ctx.toast(`Couldn’t start the download: ${error?.message ?? error}`, 6000);
+    }
+  };
+  const first = h("button", { type: "button", class: "button primary", onclick: () => go([book.code]) }, `Download ${book.name} · ${downloads.size(book.size - book.have)}`);
+  replace(
+    dialog,
+    h("h2", { class: "ask-title", id: "listen-ask-title" }, `Listen to ${book.name}`),
+    h("p", {}, `${r.reader}’s reading of the ${abbr} is downloaded when you want it, from the app’s page on GitHub.`),
+    d.error ? h("p", { class: "ask-error" }, d.error) : null,
+    h(
+      "div",
+      { class: "ask-actions" },
+      first,
+      h("button", { type: "button", class: "button", onclick: () => go(null) }, `${d.have ? "Download the rest of the Bible" : "Download the whole Bible"} · ${downloads.size(d.size - d.have)}`),
+      h("button", { type: "button", class: "button", onclick: () => dialog.close() }, "Not now"),
+    ),
+    h("p", { class: "small muted" }, "GitHub sees your device’s address, as any website does. Every file is checked before it plays."),
+  );
+  dialog.showModal();
+  first.focus();
+}
+
+/** Open the player on a chapter that's downloading, and play it once it's here. */
+function wait(s, at) {
+  player.audio.pause();
+  player.loaded = null;
+  player.heard?.classList.remove("is-heard");
+  player.heard = null;
+  player.heardIndex = -1;
+  player.waiting = { s, at };
+  openBar();
+  onDownloads();
+}
+
+function onDownloads() {
+  // The chapter in the player was deleted
+  if (player.loaded && stateOf(player.loaded.info) !== "here") {
+    close();
+    return;
+  }
+  const w = player.waiting;
+  if (w) {
+    const state = stateOf(w.s.info);
+    if (state === "here") {
+      player.waiting = null;
+      load(w.s, { at: w.at, play: true });
+      return;
+    }
+    if (state !== "coming") {
+      // The download stopped before this chapter came: cancelled, or it failed
+      player.waiting = null;
+      const error = whereIn(w.s).d?.error;
+      ctx.toast(error ?? `${w.s.heading} wasn’t downloaded`, error ? 6000 : 2500);
+      close();
+      return;
+    }
+  }
+  draw();
+}
+
+/** "12% of Psalms downloaded" (the number first: a phone shows only the start), and in
+ * full, "Downloading Psalms: 3.9 MB of 32 MB". */
+function waitingText(s) {
+  const { d, book } = whereIn(s);
+  if (!book) return ["Downloading…", ""];
+  if (d.book !== book.code) return [`Waiting to download ${book.name}`, ""];
+  const done = book.have + d.partial;
+  return [`${Math.floor((100 * done) / book.size)}% of ${book.name} downloaded`, `Downloading ${book.name}: ${downloads.size(done)} of ${downloads.size(book.size)}`];
 }
 
 // ------------------------------------------------------------------ playing
@@ -205,6 +316,7 @@ function load(s, { at = 0, play = false } = {}) {
 
 function togglePlay() {
   const a = player.audio;
+  if (player.waiting) return;
   if (!player.loaded) return playFrom(0);
   if (a.paused) a.play().catch((error) => onPlayFailed(error));
   else a.pause();
@@ -229,10 +341,12 @@ function nextSpeed() {
   draw();
 }
 
+/** Stop and close the player. A download goes on (Settings, Audio Bibles, cancels it). */
 function close() {
   player.audio.pause();
   player.open = false;
   player.loaded = null;
+  player.waiting = null;
   player.advancing = false;
   player.heard?.classList.remove("is-heard");
   player.heard = null;
@@ -252,9 +366,10 @@ async function onEnded() {
   const s = player.loaded;
   const view = ctx.state.chapter;
   // Carry on into the next chapter, if it's the chapter on screen that ended and the
-  // next one has a recording too
+  // next one is here or on its way (a book not downloaded isn't fetched unasked)
   const next = view && s?.key === player.shown?.key ? view.next : null;
-  if (next && (await infoFor(s.bible, next.book, next.chapter))) {
+  const info = next ? await infoFor(s.bible, next.book, next.chapter) : null;
+  if (info && ["here", "coming"].includes(stateOf(info))) {
     player.advancing = true;
     ctx.goTo(next.book, next.chapter, 0, { top: true });
   } else {
@@ -265,15 +380,11 @@ async function onEnded() {
 function onError() {
   const s = player.loaded;
   if (!s || !player.audio.getAttribute("src")) return;
-  if (player.found.has(s.info.recording)) {
-    ctx.toast(`Couldn’t play ${s.heading}`);
-  } else {
-    // The recording's files aren't in this build: hide it rather than fail again
-    player.missing.add(s.info.recording);
-    ctx.toast("This recording isn’t included in this build of the app");
-  }
+  ctx.toast(`Couldn’t play ${s.heading}`);
   close();
-  chapterShown();
+  // A downloaded file may have gone (iOS clears its Caches folder when short of space):
+  // then Listen offers to download it again
+  downloads.refresh().then(() => chapterShown());
 }
 
 function onPlayFailed(error) {
@@ -336,9 +447,12 @@ function draw() {
   const a = player.audio;
   const playing = player.loaded && !a.paused;
   replace(ui.play, icon(playing ? "pause" : "play"));
-  ui.play.setAttribute("aria-label", playing ? "Pause" : "Play");
-  ui.play.title = playing ? "Pause" : "Play";
-  const s = player.loaded;
+  const label = player.waiting ? "Plays once it has downloaded" : playing ? "Pause" : "Play";
+  ui.play.setAttribute("aria-label", label);
+  ui.play.title = label;
+  ui.play.disabled = Boolean(player.waiting);
+  for (const step of [ui.previous, ui.next, ui.seek]) step.disabled = Boolean(player.waiting);
+  const s = player.loaded ?? player.waiting?.s;
   ui.title.textContent = s ? s.heading : "";
   ui.speed.textContent = speedLabel(ctx.settings.audio.speed);
   ui.speed.setAttribute("aria-label", `Reading speed ${speedLabel(ctx.settings.audio.speed)}; change`);
@@ -351,6 +465,12 @@ function drawTime() {
   const ui = player.ui;
   if (!ui) return;
   const a = player.audio;
+  if (player.waiting) {
+    [ui.sub.textContent, ui.sub.title] = waitingText(player.waiting.s);
+    ui.seek.value = "0";
+    return;
+  }
+  ui.sub.title = "";
   const s = player.loaded;
   const duration = Number.isFinite(a.duration) ? a.duration : s?.info.duration ?? 0;
   ui.sub.textContent = s ? `${s.info.reader} · ${clock(a.currentTime)} / ${clock(duration)}` : "";

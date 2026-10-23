@@ -3,6 +3,7 @@
 //! The command line is in `main.rs`; the converters live here so that tests can call them.
 
 pub mod align;
+pub mod audio;
 pub mod bibles;
 pub mod commentaries;
 pub mod fathers;

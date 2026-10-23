@@ -1,13 +1,46 @@
-//! The `audio` protocol: serves the audio Bibles' chapter files to the page, with byte
-//! ranges so the player can seek. The files ship with the app (`bundle.resources` puts
-//! `audio/` beside it): desktop and iOS read them from the resource folder, Android from
-//! the APK's assets (where Google Play's install-time asset packs also land). Only a
-//! recording's own chapter files can be asked for (`kjv_core::audio::is_chapter_file`).
+//! The audio Bibles: where downloads are kept, and the `audio` protocol, which serves the
+//! chapter files to the page with byte ranges so the player can seek.
+//!
+//! A chapter is served from the downloads (each checked against the SHA-256 built into
+//! the app as it arrived; see kjv_audio), or else from the recordings a build ships beside
+//! it (`bundle.resources` puts `audio/` there): desktop and iOS read those from the
+//! resource folder, Android from the APK's assets (where Google Play's install-time asset
+//! packs also land). Only a recording's own chapter files can be asked for
+//! (`kjv_core::audio::is_chapter_file`).
 
 use std::io::{Read, Seek, SeekFrom};
+use std::sync::Arc;
 
+use kjv_audio::{Downloads, Host, Store};
 use tauri::http::{Request, Response, StatusCode, header};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
+
+/// The downloads, kept in the app's own local data folder (`audio/` in it):
+/// `%LOCALAPPDATA%\io.github.divhanthelion.scriptorium` on Windows (inside the package's
+/// own folder when installed from the Store), Application Support on macOS,
+/// `~/.local/share/io.github.divhanthelion.scriptorium` on Linux, and the app's private
+/// storage on Android, left out of its backups (res/xml/backup_rules.xml). On iOS, the
+/// Caches folder, which iOS never backs up; it may clear it when the phone runs short of
+/// space, and the app then shows the recording as not downloaded.
+pub fn downloads<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Downloads> {
+    let dir = if cfg!(target_os = "ios") { app.path().app_cache_dir()? } else { app.path().app_local_data_dir()? };
+    Ok(Downloads::new(Store::new(dir.join("audio")), host()))
+}
+
+/// The app's releases on GitHub. A debug build made with SCRIPTORIUM_AUDIO_HOST set (the
+/// dev server's stand-in, say, to try downloads on a phone before anything is published)
+/// downloads from there instead; a release build never does.
+fn host() -> Host {
+    match option_env!("SCRIPTORIUM_AUDIO_HOST") {
+        Some(base) if cfg!(debug_assertions) => Host::stand_in(base).expect("SCRIPTORIUM_AUDIO_HOST is a URL"),
+        _ => Host::github(),
+    }
+}
+
+/// Whether a recording's files came with this build of the app.
+pub fn included<R: Runtime>(app: &AppHandle<R>, recording: &str) -> bool {
+    bundled(app, &format!("{}/GEN.1.ogg", recording)).is_some()
+}
 
 /// Most bytes sent for one range request; the player asks for the rest as it needs it.
 const MAX_RANGE: u64 = 2 * 1024 * 1024;
@@ -18,8 +51,8 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, request: &Request<Vec<u8>>) -> Res
     if !kjv_core::audio::is_chapter_file(&file) {
         return status(StatusCode::NOT_FOUND);
     }
-    let Some(mut source) = open(app, &file) else {
-        // A build without its audio (a development build, or one made without the files)
+    let Some(mut source) = downloaded(app, &file).or_else(|| bundled(app, &file)) else {
+        // Not downloaded, and not shipped with this build
         return status(StatusCode::NOT_FOUND);
     };
     let len = source.len;
@@ -123,17 +156,24 @@ impl Source {
     }
 }
 
-#[cfg(not(target_os = "android"))]
-fn open<R: Runtime>(app: &AppHandle<R>, file: &str) -> Option<Source> {
-    use tauri::Manager;
-    let path = app.path().resource_dir().ok()?.join("audio").join(file);
+fn open_file(path: std::path::PathBuf) -> Option<Source> {
     let f = std::fs::File::open(path).ok()?;
     let len = f.metadata().ok()?.len();
     Some(Source { len, reader: Box::new(f) })
 }
 
+/// A downloaded chapter: kept only once its SHA-256 matched.
+fn downloaded<R: Runtime>(app: &AppHandle<R>, file: &str) -> Option<Source> {
+    open_file(app.try_state::<Arc<Downloads>>()?.store().find(file)?)
+}
+
+#[cfg(not(target_os = "android"))]
+fn bundled<R: Runtime>(app: &AppHandle<R>, file: &str) -> Option<Source> {
+    open_file(app.path().resource_dir().ok()?.join("audio").join(file))
+}
+
 #[cfg(target_os = "android")]
-fn open<R: Runtime>(_app: &AppHandle<R>, file: &str) -> Option<Source> {
+fn bundled<R: Runtime>(_app: &AppHandle<R>, file: &str) -> Option<Source> {
     let asset = android::assets()?.open(&std::ffi::CString::new(format!("audio/{}", file)).ok()?)?;
     let len = asset.length() as u64;
     Some(Source { len, reader: Box::new(asset) })

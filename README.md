@@ -11,7 +11,7 @@ A library for reading and studying the Bible: 44 English translations and 11 in 
 - **44 English translations**, from Wycliffe's and Tyndale's through the Geneva, the KJV, the Douay-Rheims, and Brenton's Septuagint to the World English Bible and the Berean Standard Bible, each checked character for character against its source
 - **Spanish and Portuguese**: the Reina-Valera 1909 and six more in Spanish, the Bíblia Livre (Almeida's translation, updated) and three more in Portuguese, read alone or beside any other, verse by verse
 - **Commentaries**: Matthew Henry, John Gill, Jamieson-Fausset-Brown, Keil & Delitzsch, Wesley's Notes, Aquinas's Catena Aurea, the Tyndale Open Study Notes with their profiles and articles, and the Fathers: Chrysostom's homilies and Augustine's expositions and tractates, each placed on the passage it expounds
-- **Audio Bibles**: the Berean Standard Bible read by Bob Souer and the World English Bible read by Winfred W. Henson, built into the app (nothing is downloaded): play any chapter, start at any verse, and follow along as each verse is marked
+- **Audio Bibles**: the Berean Standard Bible read by Bob Souer and the World English Bible read by Winfred W. Henson, downloaded a book or the whole Bible at a time when you ask (from the app's releases on GitHub, every chapter checked against a SHA-256 built into the app): play any chapter, start at any verse, and follow along as each verse is marked
 - **Cross-references**: the Treasury of Scripture Knowledge and OpenBible.info's, with each place's words in the translation you're reading
 - **The Hebrew, Aramaic, and Greek** behind the KJV, word by word, with transliteration, Strong's number, grammar, and gloss, and the lexicon entry for any word
 
@@ -37,7 +37,7 @@ Use your own AI: a server on your network (vLLM, Ollama, LM Studio, llama.cpp) o
 
 ## Free and private
 
-No ads, no account, nothing to buy, ever. Everything is on the device and works offline; nothing is collected ([privacy policy](PRIVACY.md)).
+No ads, no account, nothing to buy, ever. Everything is on the device and works offline; nothing is collected ([privacy policy](PRIVACY.md)). The app goes online only when you ask it to: to download an audio Bible, or to reach an AI service you set up.
 
 ## Keyboard shortcuts (desktop)
 
@@ -62,7 +62,7 @@ cargo tauri build        # installers for this platform
 cargo test --release -p kjv-core -p kjv-ai   # text, library, search, assistant, and parallel tests
 ```
 
-The build compiles the KJV, its Hebrew and Greek, and the whole library into compressed bundles embedded in the app, so it needs no data files or network at runtime.
+The build compiles the KJV, its Hebrew and Greek, and the whole library into compressed bundles embedded in the app, so it needs no data files or network at runtime. The audio Bibles are the exception: too large to ship (1.3 GB), they are downloaded when asked for ([docs/AUDIO.md](docs/AUDIO.md)).
 
 To work on the interface in a browser with the real data:
 

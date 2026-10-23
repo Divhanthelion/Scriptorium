@@ -1,0 +1,20 @@
+[package]
+name = "kjv-audio"
+version = "0.1.0"
+edition = "2024"
+license = "MIT-0"
+description = "Downloads the audio Bibles when asked, checking every chapter against the SHA-256 built into the app"
+publish = false
+
+[dependencies]
+kjv-core = { path = "../core" }
+kjv-library = { path = "../library" }
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+# ring + bundled Mozilla roots, as the assistant's client: the same on every target
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tiny_http = "0.12"

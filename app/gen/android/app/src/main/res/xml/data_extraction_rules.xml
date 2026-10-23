@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 12 and later: settings and bookmarks back up and transfer; AI keys don't
-     (they are encrypted with a device-only Keystore key). -->
+     (they are encrypted with a device-only Keystore key), nor do the audio Bibles
+     (audio/: downloaded again when wanted, and far past a backup's 25 MB). -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="." />
         <exclude domain="root" path="secrets.json" />
+        <exclude domain="root" path="audio/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="." />
         <exclude domain="root" path="secrets.json" />
+        <exclude domain="root" path="audio/" />
     </device-transfer>
 </data-extraction-rules>

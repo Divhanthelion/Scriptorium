@@ -899,7 +899,42 @@ await test("Translations: the KJV keeps its interlinear and gains the Apocrypha"
 
 // ------------------------------------------------------------------ audio Bibles
 
-// (CI has only 3 John's recording: tests/ui/fixtures/audio, copied into app/audio)
+// The recordings are downloaded when asked for: here from the dev server's stand-in for
+// GitHub (SCRIPTORIUM_AUDIO_HOST=test), which has only 3 John's file
+// (tests/ui/fixtures/audio-releases). Downloads last for the dev server's run.
+await test("Listen: a recording not here is downloaded when asked, then plays", "book=Third%20John&chapter=1&tr=bsb", {}, `
+  await until(() => !$("#listen-button").hidden, "Listen is offered for the BSB, though nothing is downloaded");
+  const audio = $("audio");
+  const ask = $("#listen-ask");
+  $("#listen-button").click();
+  await until(() => ask.open, "asked first");
+  assert(ask.querySelector(".ask-title").textContent === "Listen to 3 John", "about the book: " + ask.querySelector(".ask-title").textContent);
+  assert(ask.innerText.includes("Bob Souer’s reading of the BSB is downloaded when you want it, from the app’s page on GitHub."), "says where from: " + ask.innerText);
+  const buttons = () => [...ask.querySelectorAll("button")].map((b) => b.textContent);
+  assert(buttons().join("|") === "Download 3 John · 0.2 MB|Download the whole Bible · 529 MB|Not now", "the choices: " + buttons());
+  assert(document.activeElement === ask.querySelector(".button.primary"), "the book's download has the focus");
+  // Not now: nothing is fetched, nothing plays
+  [...ask.querySelectorAll("button")].find((b) => b.textContent === "Not now").click();
+  await wait(300);
+  assert(!ask.open && $("#player").hidden && audio.paused, "nothing happens");
+  // From verse 5, through the verse bar: downloaded, checked, and played from there
+  $("#v5").click();
+  await until(() => !$('#verse-actions [data-action="listen"]').hidden, "Listen in the verse bar");
+  $('#verse-actions [data-action="listen"]').click();
+  await until(() => ask.open, "asked again");
+  ask.querySelector(".button.primary").click();
+  await until(() => !$("#player").hidden, "the player opens while it downloads");
+  await until(() => !audio.paused && audio.currentTime > 0, "playing once it's here", 15000);
+  await until(() => $(".verse.is-heard")?.id === "v5", "from verse 5: " + $(".verse.is-heard")?.id);
+  $('#player [aria-label="Stop and close the player"]').click();
+  assert($("#player").hidden, "closed");
+  // Here now: Listen plays without asking
+  $("#listen-button").click();
+  await until(() => !audio.paused && audio.currentTime > 0, "playing straight away", 15000);
+  assert(!ask.open, "not asked again");
+  $('#player [aria-label="Stop and close the player"]').click();
+`);
+
 await test("Listen: the BSB read aloud, verse by verse, from any verse", "book=Third%20John&chapter=1&tr=bsb", {}, `
   await until(() => !$("#listen-button").hidden, "Listen is offered for the BSB");
   assert($("#listen-button").getAttribute("aria-label") === "Listen to 3 John 1, read by Bob Souer", "named: " + $("#listen-button").getAttribute("aria-label"));
@@ -926,8 +961,7 @@ await test("Listen: the BSB read aloud, verse by verse, from any verse", "book=T
   await until(() => audio.paused, "paused");
   $('#player [aria-label="Stop and close the player"]').click();
   assert($("#player").hidden && !$(".verse.is-heard") && $("#app").dataset.player === "closed", "closed, nothing marked");
-  // A chapter that won't load, of a recording that has played: said so, and the
-  // recording is still offered (only one that never loads is taken for missing)
+  // A chapter that won't load: said so, and the recording is still offered
   $("#listen-button").click();
   await until(() => !audio.paused && audio.currentTime > 0, "playing again", 15000);
   audio.src = "/audio/bsb-souer/3JN.99.ogg";
@@ -944,6 +978,48 @@ await test("Listen: no Listen for a translation without a recording", "book=John
   $("#v16").click();
   await until(() => !$("#verse-actions").hidden, "verse bar");
   assert($('#verse-actions [data-action="listen"]').hidden, "nor in the verse bar");
+`);
+
+await test("Listen on a phone: the question is a sheet at the bottom", "book=Second%20John&chapter=1&tr=bsb", { width: 390, height: 844, mobile: true }, `
+  await until(() => !$("#listen-button").hidden, "Listen");
+  $("#listen-button").click();
+  const ask = await until(() => $("#listen-ask").open && $("#listen-ask"), "asked");
+  const box = ask.getBoundingClientRect();
+  assert(Math.round(box.bottom) === innerHeight && Math.round(box.width) === innerWidth, "across the bottom: " + JSON.stringify(box));
+  assert(ask.querySelector(".ask-title").textContent === "Listen to 2 John", "2 John");
+  // A tap outside closes it
+  ask.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await until(() => !ask.open, "closed");
+`);
+
+await test("Settings, Audio Bibles: each recording's download, a failure said plainly, delete asks first", "book=Third%20John&chapter=1&tr=bsb", {}, `
+  $('[data-open-panel="settings"]').click();
+  const section = await until(() => $('#panel-body [data-section="audio"]'), "the Audio Bibles section");
+  const row = (id) => $('.audio-row[data-recording="' + id + '"]');
+  const text = (el) => el.innerText.replace(/\\n+/g, " | ");
+  const button = (el, label) => [...el.querySelectorAll("button")].find((b) => b.textContent === label);
+  await until(() => row("bsb-souer") && row("web-henson"), "a row for each recording");
+  assert(text(row("bsb-souer")) === "BSB, read by Bob Souer | 1 of 66 books · 0.2 MB on this device | Download the rest | Delete", "3 John is here: " + text(row("bsb-souer")));
+  assert(text(row("web-henson")) === "WEB-Y, read by Winfred W. Henson | Not downloaded · 749 MB | Download", "the WEB isn't: " + text(row("web-henson")));
+  assert($(".audio-note").textContent.startsWith("Downloaded from the app’s page on GitHub, only when you ask"), "says where from");
+  assert(section.nextElementSibling === $(".audio-settings") && $(".audio-settings").nextElementSibling.textContent.startsWith("Follow along when listening"), "following along is with them");
+  // A book the server doesn't have: said plainly, and it can be tried again
+  button(row("web-henson"), "Download").click();
+  await until(() => row("web-henson").querySelector(".audio-error:not([hidden])"), "the failure", 10000);
+  assert(text(row("web-henson")) === "WEB-Y, read by Winfred W. Henson | Not downloaded · 749 MB | Genesis isn't on the test server yet. | Try again", "said: " + text(row("web-henson")));
+  // Delete asks first; keeping it changes nothing
+  button(row("bsb-souer"), "Delete").click();
+  const confirm = await until(() => $(".audio-confirm")?.isConnected && $(".audio-confirm"), "asked to confirm");
+  assert(confirm.innerText.startsWith("Delete Bob Souer’s reading (0.2 MB) from this device? You can download it again."), "what goes: " + confirm.innerText);
+  button(confirm, "Keep it").click();
+  await until(() => !confirm.isConnected, "kept");
+  button(row("bsb-souer"), "Delete").click();
+  button(await until(() => $(".audio-confirm")?.isConnected && $(".audio-confirm"), "asked again"), "Delete").click();
+  await until(() => text(row("bsb-souer")) === "BSB, read by Bob Souer | Not downloaded · 529 MB | Download", "deleted: " + text(row("bsb-souer")));
+  // And Listen asks to download it again
+  $("#listen-button").click();
+  await until(() => $("#listen-ask").open, "asked to download again");
+  $("#listen-ask").close();
 `);
 
 const NOTES_HELPERS = `

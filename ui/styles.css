@@ -1521,3 +1521,40 @@ details.note > summary { cursor: pointer; min-height: 32px; display: list-item; 
 }
 .translation-audio { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 0.8125rem; color: var(--accent); }
 .translation-audio .icon { width: 16px; height: 16px; }
+
+/* Listen on a book not downloaded yet (listen.js): a short question; on phones, a sheet */
+.ask {
+  width: min(420px, 100vw - 32px);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.ask::backdrop { background: rgb(0 0 0 / 0.4); }
+.ask-title { margin: 0 0 6px; font-size: 1.125rem; font-weight: 650; }
+.ask p { margin: 0 0 14px; line-height: 1.5; color: var(--text-2); }
+.ask .small { margin: 14px 0 0; }
+.ask-error { color: var(--red-letter) !important; }
+.ask-actions { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 640px) {
+  .ask {
+    width: 100vw;
+    max-width: 100vw;
+    margin: auto 0 0;
+    border-width: 1px 0 0;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(20px + var(--safe-bottom));
+  }
+}
+
+/* Settings, Audio Bibles (panels.js) */
+.audio-row { flex-wrap: wrap; gap: 8px 16px; padding: 8px 0; }
+.audio-row .setting-label { flex: 1 1 14rem; min-width: 0; }
+.audio-error { color: var(--red-letter); }
+.audio-progress { display: block; width: 100%; height: 6px; margin-top: 6px; accent-color: var(--accent); }
+.audio-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.audio-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0 12px; border-bottom: 1px solid var(--border); }
+.audio-confirm .grow { flex: 1 1 14rem; }
+.audio-note { margin: 10px 0 4px; }
