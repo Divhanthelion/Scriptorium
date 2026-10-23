@@ -1,7 +1,9 @@
 //! Audio Bibles: recordings that ship with the app, one file per chapter
 //! (`audio/<recording>/<BOOK>.<CH>.ogg` beside the app), with each chapter's verse
 //! timings built in from `data/audio/<recording>.json`, so the reader can follow along
-//! and start at any verse. Nothing is ever downloaded.
+//! and start at any verse. Nothing is ever downloaded. Recordings not yet cleared for
+//! store builds are in `data/audio/sideload/`, built in only with
+//! `SCRIPTORIUM_SIDELOAD_AUDIO=1` (build.rs, docs/AUDIO.md).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -109,9 +111,15 @@ pub fn is_chapter_file(file: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn parse(texts: &[&str]) -> Vec<Catalogue> {
+        texts.iter().map(|text| serde_json::from_str(text).expect("data/audio catalogue parses")).collect()
+    }
+
     #[test]
     fn every_catalogue_is_whole_and_in_order() {
-        for c in catalogues() {
+        // Those built in, and data/audio/sideload/'s whether or not this build has them
+        let sideload = parse(SIDELOAD_CATALOGUES);
+        for c in catalogues().iter().chain(&sideload) {
             assert_eq!(c.chapters.len(), 1189, "{}: every chapter of the 66 books", c.id);
             for (key, t) in &c.chapters {
                 let (code, _) = key.split_once('.').unwrap();
@@ -119,7 +127,20 @@ mod tests {
                 assert!(t.d > 0.0 && !t.v.is_empty(), "{} {}", c.id, key);
                 assert!(t.v.windows(2).all(|w| w[0].1 <= w[1].1), "{} {}: verse starts in order", c.id, key);
                 assert!(t.v.iter().all(|v| v.1 >= 0.0 && v.1 <= t.d), "{} {}: starts inside the recording", c.id, key);
+                let labels: std::collections::HashSet<&str> = t.v.iter().map(|v| v.0.as_str()).collect();
+                assert_eq!(labels.len(), t.v.len(), "{} {}: each verse once", c.id, key);
             }
+        }
+    }
+
+    #[test]
+    fn sideload_recordings_stay_out_of_store_builds() {
+        let store: Vec<String> = parse(STORE_CATALOGUES).into_iter().map(|c| c.id).collect();
+        for c in parse(SIDELOAD_CATALOGUES) {
+            assert!(!store.contains(&c.id), "{}: in both data/audio/ and data/audio/sideload/", c.id);
+            let built_in = catalogues().iter().any(|b| b.id == c.id);
+            assert_eq!(built_in, SIDELOAD_BUILT_IN, "{}: built in only with SCRIPTORIUM_SIDELOAD_AUDIO=1", c.id);
+            assert_eq!(is_chapter_file(&format!("{}/GEN.1.ogg", c.id)), SIDELOAD_BUILT_IN, "{}: its files", c.id);
         }
     }
 

@@ -19,6 +19,8 @@ kjv-library = { path = "../crates/library", features = ["build"] }
 zstd = "0.13"
 ruzstd = "0.8"
 sha2 = "0.10"
+# Reads data/audio/sideload's recording ids, whose audio a store build must not pack
+serde_json = "1.0"
 
 [dependencies]
 kjv-core = { path = "../crates/core" }
